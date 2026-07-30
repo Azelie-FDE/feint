@@ -1,0 +1,38 @@
+name: OSV-Scanner
+
+# Scans for known vulnerabilities AND malicious packages (MAL-) via the OSV database. PR runs flag
+# what a change introduces; scheduled runs catch packages reclassified as malicious after the fact.
+#
+# feint has no external dependency today — that is deliberate, and go.sum does not exist. So this
+# scans almost nothing right now, and it is here anyway for two reasons: it covers the Go
+# toolchain and standard library, and it is the guard that turns "zero dependency" from a claim
+# into something checked the moment somebody adds one.
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '30 12 * * 1'
+
+permissions: {}
+
+jobs:
+  scan-pr:
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    permissions:
+      actions: read
+      security-events: write
+      contents: read
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+
+  scan-scheduled:
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    permissions:
+      actions: read
+      security-events: write
+      contents: read
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8

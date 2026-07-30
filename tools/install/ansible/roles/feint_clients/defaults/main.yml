@@ -1,0 +1,30 @@
+---
+# The official clients the conformance suites drive, pinned and verified.
+#
+# Pinned because a suite whose client changes under it reports a difference
+# nobody made. Verified because this installs four third-party binaries and then
+# gives them a shell — the same reasoning as the CI workflow, which uses these
+# same versions and sums.
+#
+# `sha256` is empty where upstream publishes a checksum file: the digest then
+# comes from them, and is fetched beside the asset. It is filled in only where
+# upstream publishes nothing, which is weaker — it proves the asset has not
+# changed since somebody looked at it, not that upstream signed it — and is the
+# strongest thing available there.
+feint_clients_scw_version: "2.56.3"
+feint_clients_oapi_version: "v0.15.0"
+feint_clients_oapi_sha256: "798b9af7db9da9539303732ba55be71ff0bec58aa9ef51751de41b2eeee8138a"
+# 1.95.6, not 1.86: v1.86 ignores the `endpoint` key in its own configuration
+# file and goes to the real Exoscale, which the suite met as "Invalid key or
+# request signature" — a client talking to a paying account because a version
+# was pinned without being proven. The station measures against 1.95.x, so that
+# is what is pinned.
+feint_clients_exo_version: "v1.95.6"
+feint_clients_terraform_version: "1.13.3"
+feint_clients_tofu_version: "1.12.5"
+
+# Terraform and OpenTofu are the same fixture driven twice. Installing both on
+# every machine doubles the download for a difference the suites already cover,
+# so OpenTofu is the default: it is the one a reader is more likely to have.
+feint_clients_want_terraform: false
+feint_clients_want_tofu: true

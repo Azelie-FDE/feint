@@ -1,0 +1,68 @@
+package outscale
+
+import (
+	"net/http"
+
+	"github.com/stephrobert/feint/internal/core/emulator"
+)
+
+// Outscale errors are an Errors array of {Code, Type, Details} beside the usual
+// ResponseContext. The shape is ErrorResponse in the SDK; the field names below
+// mirror it exactly, because a client that cannot decode an error reports a
+// parsing failure and sends whoever reads it looking in the wrong place.
+//
+// The numbers are the part that cannot be read from the SDK. What the SDK does
+// pin down is the ranges its own helpers branch on, in pkg/osc/errors.go:
+// IsNotFound is 5000-5999, IsConflict is 6000-6999 or 9000-9999, IsQuotaOrCapacity
+// is 10000-10999, and IsAuthError is an explicit list. So the constants below
+// are chosen to land in the range that makes those helpers answer correctly,
+// which is what client code actually branches on. The exact number inside a
+// range is not verifiable without an account, and is not what anything tests.
+
+const (
+	// codeInvalidParameter covers a malformed or missing argument. No SDK helper
+	// classifies this range, so the number carries no behaviour.
+	codeInvalidParameter = "4001"
+	// codeResourceNotFound sits in 5000-5999 so osc.IsNotFound reports true.
+	codeResourceNotFound = "5063"
+	// codeResourceConflict sits in 9000-9999 so osc.IsConflict reports true. It
+	// is what a delete blocked by a dependency answers.
+	codeResourceConflict = "9029"
+)
+
+const (
+	typeInvalidParameter = "InvalidParameterValue"
+	typeInvalidResource  = "InvalidResource"
+	typeResourceConflict = "ResourceConflict"
+)
+
+// writeError emits the Outscale error envelope.
+func (p *Pack) writeError(w http.ResponseWriter, status int, code, errType, details string) {
+	emulator.WriteJSON(w, status, map[string]any{
+		"Errors": []map[string]string{{
+			"Type":    errType,
+			"Code":    code,
+			"Details": details,
+		}},
+		"ResponseContext": p.context(),
+	})
+}
+
+// badRequest is the answer to an argument the API will not take. Outscale
+// answers 400 for these, which is what the client's own retry logic treats as
+// final rather than worth another attempt.
+func (p *Pack) badRequest(w http.ResponseWriter, details string) {
+	p.writeError(w, http.StatusBadRequest, codeInvalidParameter, typeInvalidParameter, details)
+}
+
+// notFound is the answer to an identifier that names nothing.
+func (p *Pack) notFound(w http.ResponseWriter, kind, id string) {
+	p.writeError(w, http.StatusBadRequest, codeResourceNotFound, typeInvalidResource,
+		"the "+kind+" "+id+" does not exist")
+}
+
+// conflict is the answer to an operation a dependency forbids: deleting a subnet
+// a machine still sits on, or a security group a machine still carries.
+func (p *Pack) conflict(w http.ResponseWriter, details string) {
+	p.writeError(w, http.StatusConflict, codeResourceConflict, typeResourceConflict, details)
+}

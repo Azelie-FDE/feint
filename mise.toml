@@ -1,0 +1,229 @@
+# mise — unified toolchain + task runner for feint (versions pinned, reproducible across machines
+# and CI). Activate: `mise install` then `mise trust`. Run a task: `mise run <task>`. List: `mise tasks`.
+[tools]
+go = "1.26.5"            # the feint binary
+golangci-lint = "2.12.2" # Go linters, mirrors .golangci.yml and the Go workflow
+trufflehog = "3.95.6"    # secret scanning (pre-commit + CI)
+python = "3.12.11"       # the contract extraction under tools/, development time only
+uv = "0.11.26"           # brings the extraction its one dependency without a venv to maintain
+ruff = "0.14.9"          # Python lint + format, mirrors .pre-commit-config.yaml
+
+[env]
+FEINT_ADDR = "127.0.0.1:4599"
+# Where the upstream SDK checkouts live. The drift scan reads them as source; it never imports them.
+FEINT_SDK_SCALEWAY = "{{config_root}}/.upstream/scaleway-sdk-go"
+FEINT_SDK_OUTSCALE = "{{config_root}}/.upstream/osc-sdk-go"
+FEINT_SPEC_EXOSCALE = "{{config_root}}/.upstream/exoscale-openapi.yaml"
+FEINT_SPEC_SCALEWAY = "{{config_root}}/.upstream/scaleway-openapi"
+
+# ---- Build / run ------------------------------------------------------------------------------
+[tasks.build]
+description = "Build the feint binary into ./feint"
+run = "go build -o feint ./cmd/feint"
+
+[tasks.serve]
+description = "Run the emulator. Back servers with real machines: FEINT_VM=incus-vm mise run serve"
+depends = ["build"]
+# FEINT_VM is read from the environment rather than declared in [env], so that
+# setting it on the command line still wins. It stays off by default: starting
+# machines on the operator's host is a side effect, and it must be asked for.
+# incus-vm gives real KVM machines; incus shares the host kernel; incus-ovn
+# backs subnets with OVN networks, isolated by construction (needs ovn-central
+# and ovn-host). Incus is the only runtime: see docs/limits.md for why Docker
+# was removed.
+run = "./feint serve --addr $FEINT_ADDR --vm ${FEINT_VM:-off}"
+
+[tasks.test]
+description = "Run the unit tests with the race detector"
+run = "go test -race ./..."
+
+[tasks.fuzz]
+description = "Fuzz the request decoders. Longer run: FUZZTIME=5m mise run fuzz"
+run = "go test ./internal/providers/scaleway/ -run '^$' -fuzz 'FuzzCreateServer' -fuzztime=\"${FUZZTIME:-30s}\""
+
+[tasks.lint]
+description = "gofmt, vet, golangci-lint, shellcheck"
+depends = ["lint-shell"]
+run = """
+test -z "$(gofmt -l .)" || { echo 'gofmt needed:'; gofmt -l .; exit 1; }
+go vet ./...
+golangci-lint run ./...
+"""
+
+[tasks.check]
+description = "Everything CI runs on a pull request"
+depends = ["lint", "test"]
+run = "echo 'local check passed'"
+
+# ---- Upstream tracking (the anti-drift loop) --------------------------------------------------
+[tasks."upstream:sync"]
+description = "Fetch the upstream SDKs and API descriptions the scan and the contracts read"
+# Three providers, three ways of publishing, all fetched here so no step of the
+# chain depends on somebody having run a curl by hand once.
+#
+# Every download uses -f, so a moved URL fails the task instead of leaving a
+# stale file that would silently describe last year's API.
+run = """
+set -e
+mkdir -p "{{config_root}}/.upstream"
+sync() {
+  if [ -d "$2/.git" ]; then
+    git -C "$2" pull --ff-only
+  else
+    git clone --filter=blob:none "$1" "$2"
+  fi
+}
+sync https://github.com/scaleway/scaleway-sdk-go.git "$FEINT_SDK_SCALEWAY"
+sync https://github.com/outscale/osc-sdk-go.git "$FEINT_SDK_OUTSCALE"
+
+# Exoscale ships no OpenAPI document inside its SDK; it publishes one, and their
+# own Go SDK is generated from it. So the document is the source here, the way a
+# checkout is for the other two.
+curl -sSfL https://openapi-v2.exoscale.com/source.yaml -o "$FEINT_SPEC_EXOSCALE"
+
+# Scaleway publishes one document per product, as the "Download schema" link of
+# each product page. No repository carries them and there is no machine-readable
+# index, so tools/contract/scaleway-products.txt is the index.
+mkdir -p "$FEINT_SPEC_SCALEWAY"
+grep -v '^\\s*#' tools/contract/scaleway-products.txt | grep -v '^\\s*$' | while read -r product; do
+  curl -sSfL "https://www.scaleway.com/en/developers/api/$product/schema.yml" \\
+    -o "$FEINT_SPEC_SCALEWAY/$(echo "$product" | tr / -).yml"
+done
+"""
+
+# The Scaleway gate is restricted to the products the emulator has started:
+# accounting for all 1700 upstream operations would fail forever and teach
+# everyone to ignore it. Outscale needs no such filter — its API is one flat
+# namespace per service, and the baseline carries the whole of it.
+[tasks."drift:check"]
+description = "Fail if the upstream surface moved since the committed baseline"
+depends = ["build", "upstream:sync"]
+run = "tools/drift/gate.sh check ./feint"
+
+[tasks."drift:update"]
+description = "Refresh the baseline and the coverage data after triaging new upstream operations"
+depends = ["build", "upstream:sync"]
+run = "tools/drift/gate.sh update ./feint"
+
+# ---- Conformance (the real clients) -----------------------------------------------------------
+[tasks."conformance:cli"]
+description = "Drive the running emulator with the real scw CLI"
+run = "tools/conformance/scaleway/scw-cli.sh http://$FEINT_ADDR"
+
+[tasks."conformance:terraform"]
+description = "Run the real Terraform provider against the running emulator"
+run = "tools/conformance/scaleway/terraform.sh http://$FEINT_ADDR"
+
+[tasks."conformance:network"]
+description = "Prove the emulated network is real: blocks, addresses, and a firewall that filters. Needs FEINT_VM=incus"
+run = [
+  "tools/conformance/scaleway/network.sh http://$FEINT_ADDR",
+  "tools/conformance/outscale/network.sh http://$FEINT_ADDR",
+]
+
+[tasks."conformance:ssh"]
+description = "Register a key, boot a server, log into it. Needs FEINT_VM=incus or incus-vm"
+run = "tools/conformance/scaleway/ssh.sh http://$FEINT_ADDR"
+
+[tasks."conformance:oapi"]
+description = "Drive the running emulator with the real Outscale CLI"
+run = "tools/conformance/outscale/oapi-cli.sh http://$FEINT_ADDR"
+
+[tasks.lint-shell]
+description = "shellcheck every script in the repository"
+run = "git ls-files -z '*.sh' | xargs -0 shellcheck --severity=style"
+
+[tasks."release:check"]
+description = "Everything that must be true before a tag exists: mise run release:check -- v0.1.0"
+depends = ["build"]
+run = "tools/release/preflight.sh"
+
+[tasks."docs:coverage"]
+description = "Regenerate every generated section: coverage tables, client matrix, route reference"
+depends = ["build"]
+run = "./feint docs"
+
+[tasks.demo]
+description = "Re-record the README's demo GIF from tools/demo/quickstart.tape"
+depends = ["build"]
+# Needs vhs, plus the ttyd and ffmpeg it drives:
+#   go install github.com/charmbracelet/vhs@latest
+#
+# The tape is versioned and the GIF is a build product of it. That ordering is
+# the point: a recording nobody can re-run is a claim, and this project's whole
+# argument is that a claim is not a proof. Every command in the tape really
+# executes, so a demo that breaks is a demo that tells the truth about a
+# regression.
+run = """
+command -v vhs >/dev/null 2>&1 || { echo 'vhs is not installed: go install github.com/charmbracelet/vhs@latest' >&2; exit 1; }
+vhs tools/demo/quickstart.tape
+ls -lh docs/assets/quickstart.gif
+"""
+
+[tasks."docs:check"]
+description = "Fail (exit 2) when README.md's generated section is out of date"
+depends = ["build"]
+run = "./feint docs --check"
+
+[tasks."conformance:exo"]
+description = "Drive the running emulator with the real Exoscale CLI"
+run = "tools/conformance/exoscale/exo-cli.sh http://$FEINT_ADDR"
+
+[tasks.probe]
+description = "Drive every mounted route from its provider's API description and check the answers"
+depends = ["build"]
+# Refuses to run against an emulator with a machine runtime: a synthetic walk of
+# every Create* would start a container per route on the operator's host.
+run = "./feint probe --endpoint http://$FEINT_ADDR --contracts contracts"
+
+[tasks."contract:update"]
+description = "Re-extract the API contracts the emulator checks its responses against"
+depends = ["upstream:sync"]
+# The work lives in tools/contract/update.sh because the weekly drift workflow
+# needs it too, and a GitHub runner has no mise. One script, two callers, no
+# chance of the CI extracting the contracts differently from the workstation.
+run = "tools/contract/update.sh"
+
+[tasks.conformance]
+description = "Start the emulator, run every client suite, stop it"
+depends = ["build"]
+run = """
+# start, wait, stop rather than `&`, a trap and a hand-rolled curl loop.
+#
+# This rewrite is the proof of the lifecycle verbs, not a tidy-up. The brief that
+# specified them said it plainly: if this suite cannot be expressed with them,
+# the verbs are wrong. What it replaced was three lines of shell that every
+# script in the repository had copied, one of which — polling forty times at a
+# quarter second — hid the difference between "still starting" and "died at once".
+#
+# --contracts turns on the response check: every answer a real client provokes is
+# validated against the provider's own API description, which is broader than any
+# set of cases somebody thought to write.
+./feint start --addr $FEINT_ADDR --vm ${FEINT_VM:-off} --contracts contracts --timeout 60s
+trap './feint stop --addr $FEINT_ADDR >/dev/null 2>&1 || true' EXIT
+tools/conformance/scaleway/scw-cli.sh "http://$FEINT_ADDR"
+tools/conformance/scaleway/terraform.sh "http://$FEINT_ADDR"
+tools/conformance/outscale/oapi-cli.sh "http://$FEINT_ADDR"
+tools/conformance/exoscale/exo-cli.sh "http://$FEINT_ADDR"
+# Every route driven from its provider's API description. Skipped when a machine
+# runtime is on: a synthetic walk of every Create* would start a container each.
+if [ "${FEINT_VM:-off}" = "off" ]; then ./feint probe --endpoint "http://$FEINT_ADDR" --contracts contracts; fi
+# Skips itself when no machine runtime is configured, so CI stays runtime-free.
+tools/conformance/scaleway/network.sh "http://$FEINT_ADDR"
+tools/conformance/outscale/network.sh "http://$FEINT_ADDR"
+# Two numbers rather than one: how much is mounted, and how much of it a real
+# client has actually driven. The gap is the part nobody has proven.
+tools/conformance/score.sh "http://$FEINT_ADDR"
+"""
+
+[tasks."demo:network"]
+description = "Re-record the network demo as MP4 (for social posts); needs Incus + OVN"
+depends = ["build"]
+# Separate from `demo` because it needs a host that can start machines: Incus
+# with ovn-central, ovn-host and Open vSwitch. `mise run demo` runs anywhere.
+run = """
+command -v vhs >/dev/null 2>&1 || { echo 'vhs is not installed: go install github.com/charmbracelet/vhs@latest' >&2; exit 1; }
+command -v incus >/dev/null 2>&1 || { echo 'incus is not installed: this demo needs a machine runtime' >&2; exit 1; }
+vhs tools/demo/network.tape
+ls -lh docs/assets/network.mp4
+"""

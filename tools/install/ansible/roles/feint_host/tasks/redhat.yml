@@ -1,0 +1,171 @@
+# Rocky and Fedora. Rocky needs two repositories nothing enables by default.
+---
+# Rocky 10 has no packaged Incus, and this is measured rather than assumed: the
+# neelc/incus COPR the Incus documentation names publishes an epel-9 chroot and
+# no epel-10 one (200 and 404 respectively, checked), EPEL itself carries no
+# incus at any version, and Zabbly publishes .deb only — pkgs.zabbly.com holds
+# dists/ and pool/ and no RPM at all.
+#
+# Failing here with the reason is the whole point. An install guide that lets a
+# reader discover this from a 404 four steps later has wasted their afternoon,
+# and one that quietly skips OVN would hand them an emulator that cannot isolate
+# two VPCs while telling them it can.
+- name: Rocky 10 has no packaged Incus today
+  ansible.builtin.fail:
+    msg: >-
+      {{ ansible_distribution }} {{ ansible_distribution_version }}: no packaged Incus exists for
+      Enterprise Linux 10. EPEL carries none, the neelc/incus COPR has no epel-10
+      chroot, and Zabbly publishes Debian packages only. Use Rocky 9, Fedora, or
+      build Incus from source. docs/install.md records the checks behind this.
+  when:
+    - ansible_distribution != 'Fedora'
+    - ansible_distribution_major_version | int >= 10
+
+- name: Enable EPEL and CRB on the Rocky family
+  when: ansible_distribution != 'Fedora'
+  block:
+    # The key first, then the package it signs. Chicken and egg otherwise: the
+    # epel-release RPM is signed by the EPEL key, and that key arrives *with*
+    # epel-release — so a straight install fails with "Public key ... is not
+    # installed". Measured on Rocky 9 and 10.
+    #
+    # The answer is to import the key, never to pass disable_gpg_check: an
+    # install guide that turns off signature verification to get past an error
+    # teaches the reader to do it again somewhere it matters.
+    - name: Import the EPEL signing key
+      ansible.builtin.rpm_key:
+        key: "https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-{{ ansible_distribution_major_version }}"
+        state: present
+
+    - name: EPEL, whose signature can now be checked
+      ansible.builtin.dnf:
+        name: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm"
+        state: present
+        disable_gpg_check: false
+
+    - name: CRB, which several EPEL packages build against
+      ansible.builtin.command:
+        cmd: dnf config-manager --set-enabled crb
+      changed_when: true
+      failed_when: false
+
+    - name: The CentOS NFV SIG, which is where OVN is packaged
+      ansible.builtin.dnf:
+        name: centos-release-nfv-openvswitch
+        state: present
+      failed_when: false
+      when: feint_host_want_ovn | bool
+
+    # Incus is not in EPEL and Zabbly publishes .deb only — checked, on both
+    # counts: `dnf list --available incus` finds nothing on Rocky 9 or 10 with
+    # EPEL, CRB and the NFV SIG all enabled, and pkgs.zabbly.com/incus/stable/
+    # contains dists/ and pool/ and no RPM at all.
+    #
+    # The Incus documentation names one route for this family, and says what it
+    # is: the neelc/incus COPR, "not an official project of Incus nor Rocky
+    # Linux". That is a third party with package-install rights on the machine,
+    # so it is stated here rather than buried — a reader on Rocky is trusting
+    # somebody the Incus project does not vouch for, and should know it.
+    - name: dnf-command(copr), which Rocky does not ship by default
+      ansible.builtin.dnf:
+        name: dnf-command(copr)
+        state: present
+
+    - name: The neelc/incus COPR — unofficial, and the only packaged route on this family
+      ansible.builtin.command:
+        cmd: dnf -y copr enable neelc/incus
+      register: feint_host_copr
+      changed_when: feint_host_copr.rc == 0
+      failed_when: false
+
+    # Rocky 10 has no COPR chroot that `dnf copr enable` will accept, and the
+    # Incus documentation says so: the .repo file is fetched directly there.
+    # Measured — the command exits 1 on Rocky 10 and 0 on Rocky 9.
+    - name: The same repository, fetched as a file where copr enable will not
+      ansible.builtin.get_url:
+        url: >-
+          https://copr.fedorainfracloud.org/coprs/neelc/incus/repo/epel-{{ ansible_distribution_major_version }}/neelc-incus-epel-{{ ansible_distribution_major_version }}.repo
+        dest: /etc/yum.repos.d/neelc-incus.repo
+        mode: "0644"
+      when: feint_host_copr.rc != 0
+
+# The NFV SIG versions every package name — there is no `ovn`, there is
+# `ovn26.03`. Resolved at run time rather than pinned, because the version
+# floats with the SIG and a pinned name breaks the day it moves.
+# The NFV SIG versions every package name — there is no `ovn` and no
+# `openvswitch`, there are `ovn26.03` and `openvswitch3.5`. Both series are read
+# from the machine rather than pinned, because they float with the SIG and a
+# pinned name breaks the day it moves. Highest available wins.
+- name: Find the OVN series this release carries
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      # Installed first, available second. `dnf list --available` excludes what
+      # is already installed, so on a second run the highest "available" series
+      # is an *older* one — and installing it fails on file conflicts with the
+      # series already there. Measured, on the re-run that found this.
+      installed=$(dnf -q list --installed 'ovn*-central' 2>/dev/null | awk '{print $1}' |
+        grep -E '^ovn[0-9.]+-central' | sed 's/-central.*//' | sort -V | tail -1)
+      if [ -n "$installed" ]; then printf '%s\n' "$installed"; exit 0; fi
+      dnf -q list --available 'ovn*-central' 2>/dev/null | awk '{print $1}' |
+        grep -E '^ovn[0-9.]+-central' | sed 's/-central.*//' | sort -V | tail -1
+  args:
+    # /bin/sh is dash on Debian and Ubuntu, and dash has no `set -o pipefail` —
+    # "Illegal option -o pipefail", which reads like a syntax error in the script
+    # rather than a shell that does not have the option. Naming bash is the fix;
+    # dropping pipefail would be the wrong one, since the whole point is to catch
+    # a failing command in the middle of the pipe.
+    executable: /bin/bash
+  register: feint_host_ovn_series
+  changed_when: false
+  failed_when: false
+  when: feint_host_want_ovn | bool and ansible_distribution != 'Fedora'
+
+- name: Find the Open vSwitch series this release carries
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      installed=$(dnf -q list --installed 'openvswitch*' 2>/dev/null | awk '{print $1}' |
+        grep -E '^openvswitch[0-9.]+\.' | sed 's/\.[a-z0-9_]*$//' | sort -V -u | tail -1)
+      if [ -n "$installed" ]; then printf '%s\n' "$installed"; exit 0; fi
+      dnf -q list --available 'openvswitch*' 2>/dev/null | awk '{print $1}' |
+        grep -E '^openvswitch[0-9.]+\.' | sed 's/\.[a-z0-9_]*$//' | sort -V -u | tail -1
+  args:
+    # /bin/sh is dash on Debian and Ubuntu, and dash has no `set -o pipefail` —
+    # "Illegal option -o pipefail", which reads like a syntax error in the script
+    # rather than a shell that does not have the option. Naming bash is the fix;
+    # dropping pipefail would be the wrong one, since the whole point is to catch
+    # a failing command in the middle of the pipe.
+    executable: /bin/bash
+  register: feint_host_ovs_series
+  changed_when: false
+  failed_when: false
+  when: feint_host_want_ovn | bool and ansible_distribution != 'Fedora'
+
+- name: Install Incus and OVN
+  ansible.builtin.dnf:
+    name: "{{ feint_host_incus_packages + (feint_host_resolved_ovn if feint_host_want_ovn | bool else []) }}"
+    state: present
+  vars:
+    feint_host_series: "{{ (feint_host_ovn_series.stdout | default('') | trim) }}"
+    feint_host_ovs: "{{ (feint_host_ovs_series.stdout | default('openvswitch') | trim) or 'openvswitch' }}"
+    feint_host_resolved_ovn: >-
+      {{ feint_host_ovn_packages if ansible_distribution == 'Fedora' or feint_host_series == ''
+         else [feint_host_series, feint_host_series ~ '-central', feint_host_series ~ '-host', feint_host_ovs] }}
+
+# Nothing here disables SELinux. An install guide that says "setenforce 0" is a
+# guide that teaches people to switch off what would have caught their next
+# mistake; relabelling is what the situation actually calls for.
+- name: Relabel the Incus state directory for SELinux
+  ansible.builtin.command:
+    cmd: restorecon -R /var/lib/incus
+  changed_when: false
+  failed_when: false
+  when: ansible_selinux.status | default('disabled') == 'enabled'
+
+- name: Start Incus
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [incus.socket, incus.service]

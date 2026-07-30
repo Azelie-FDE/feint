@@ -1,0 +1,79 @@
+name: Roadmap batch
+description: One batch of docs/roadmap.md, carried from identifier to evidence
+labels: [roadmap]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One issue per batch of the table in `docs/roadmap.md` ("The operational
+        view"). The batch's operation lists and measurements live in its
+        per-provider document; this issue carries the decision state and the
+        command that closes it. **A batch is closed by its evidence, never by
+        intent** — the four conditions at the bottom are the "When a batch is
+        done" section of the roadmap, not a new definition.
+
+  - type: input
+    id: batch
+    attributes:
+      label: Batch identifier
+      description: As the roadmap table spells it.
+      placeholder: SW-2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      description: Cross-cutting means the change lands in the shared layers and all packs at once, like X-1.
+      options: [Scaleway, Outscale, Exoscale, Cross-cutting]
+    validations:
+      required: true
+
+  - type: textarea
+    id: delivers
+    attributes:
+      label: What it delivers
+      description: The roadmap table's "Delivers" column, expanded if useful. Operations by their upstream names.
+    validations:
+      required: true
+
+  - type: textarea
+    id: lands
+    attributes:
+      label: Where the work lands
+      description: The files, from the roadmap table and the batch's document section.
+    validations:
+      required: true
+
+  - type: input
+    id: after
+    attributes:
+      label: Depends on
+      description: >
+        Batch identifiers or issue numbers this waits on — the roadmap table's
+        "After" column. Reference the issues with # so GitHub cross-links them,
+        and add the `blocked` label until they close. Empty means unblocked.
+      placeholder: "SW-1 (#12)"
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: The command that closes it
+      description: The roadmap table's "Ends when" column, as something that runs. An intention is not a command.
+      render: shell
+      placeholder: |
+        mise run conformance   # including this batch's own new evidence
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: done
+    attributes:
+      label: Done means all four
+      description: The "When a batch is done" conditions of docs/roadmap.md. Tick them as they turn true; the issue closes when all four are.
+      options:
+        - label: "`mise run check` passes (gofmt, vet, golangci-lint, `go test -race`)"
+        - label: "Every new route declares its upstream `Route.Operation`, and `TestEveryRouteDeclaresAnOperation` proves it"
+        - label: "`mise run conformance` passes, including this batch's own new evidence — a unit test alone closes nothing"
+        - label: "`tools/drift/gate.sh check` returns 0, this batch's operations served or declined with a reason, never left untriaged"

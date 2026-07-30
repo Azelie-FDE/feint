@@ -1,0 +1,38 @@
+version: 2
+
+# Supply-chain quarantine: a 14-day cooldown before adopting a new dependency version, so a
+# freshly published (or freshly compromised) release is never pulled in on the day it lands.
+# Security updates from Dependabot alerts are NOT delayed by the cooldown.
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 10
+    groups:
+      go-modules:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # The ecosystem that actually moves here. Every action is pinned to a full
+  # commit SHA, which is the posture this project advertises — and a pin nobody
+  # refreshes is a pin that ages until the first CVE. gomod above is a no-op by
+  # design (zero dependencies, no go.sum); this is not.
+  #
+  # sha-and-version keeps the SHA *and* the `# vX.Y.Z` comment beside it in step,
+  # so a reader can still tell what a forty-character hash is.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci(deps)"

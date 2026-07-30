@@ -1,0 +1,11 @@
+---
+# Fedora carries both in its own repositories and needs nothing third-party —
+# the one place this family is simpler. Rocky carries neither: Incus comes from
+# an unofficial COPR the Incus documentation names, and OVN from the CentOS NFV
+# SIG, which versions every package and service name it publishes.
+feint_host_incus_packages: [incus, incus-agent]
+feint_host_ovn_packages: [ovn, ovn-central, ovn-host, openvswitch]
+
+# Fedora's names. The Rocky ones are resolved on the machine, because
+# `openvswitch` there is `openvswitch3.5` and the unit follows the package.
+feint_host_ovn_services: [openvswitch, ovn-northd, ovn-controller]

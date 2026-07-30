@@ -1,0 +1,26 @@
+# The Scaleway API products feint tracks, as <portal-slug>/<version>.
+#
+# Scaleway publishes one OpenAPI document per product, at
+#   https://www.scaleway.com/en/developers/api/<slug>/<version>/schema.yml
+# which is the "Download schema" link on each product page. There is no
+# repository carrying them and no machine-readable index, so this list is the
+# index — kept here rather than inline in mise.toml so that adding a product is
+# one line and not a shell edit.
+#
+# The slug is the portal's, and it is NOT always the SDK package name. Measured:
+#   baremetal -> elastic-metal
+#   lb        -> load-balancer/zoned
+#   k8s       -> kubernetes
+# So a product added here has to be checked against its page rather than guessed
+# from the Go SDK, and upstream:sync fails loudly on a 404 instead of leaving a
+# stale file behind.
+#
+# Restricted to the products the emulator has actually started, the same way the
+# drift gate is: pulling all of Scaleway's surface would produce a contract
+# describing an API nobody serves.
+
+instance/v1
+vpc/v2
+ipam/v1
+iam/v1alpha1
+marketplace/v2

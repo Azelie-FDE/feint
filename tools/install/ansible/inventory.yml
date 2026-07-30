@@ -1,0 +1,11 @@
+# The inventory is read from Terraform's state, never written by hand.
+#
+# cloud.terraform.terraform_provider walks the state file and turns every
+# incus_instance into a host. A machine added to terraform/main.tf therefore
+# appears here with nothing else to edit — which is the point: two lists of the
+# same machines is how one of them goes stale, and this repository has already
+# paid for that class of defect more than once.
+#
+#   ansible-inventory -i inventory.yml --graph
+plugin: cloud.terraform.terraform_provider
+project_path: ../terraform

@@ -1,0 +1,272 @@
+# File created using '.gitignore Generator' for Visual Studio Code: https://bit.ly/vscode-gig
+# Created by https://www.toptal.com/developers/gitignore/api/go,python
+# Edit at https://www.toptal.com/developers/gitignore?templates=go,python
+
+### Go ###
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+### Python ###
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+#   Anchored, unlike the generated original: a bare `instance/` also matched
+#   internal/drift/testdata/fake-scaleway-sdk/api/instance/v1/, which is the
+#   fixture the drift scan is tested against. It would have vanished from the
+#   first commit and taken the test with it.
+/instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+#   For a library or package, you might want to ignore these files since the code is
+#   intended to run in multiple environments; otherwise, check them in:
+# .python-version
+
+# pipenv
+#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if having platform-specific dependencies or dependencies
+#   having no cross-platform support, pipenv may install dependencies that don't work, or not
+#   install all needed dependencies.
+#Pipfile.lock
+
+# poetry
+#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
+#   This is especially recommended for binary packages to ensure reproducibility, and is more
+#   commonly ignored for libraries.
+#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
+#poetry.lock
+
+# pdm
+#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
+#pdm.lock
+#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
+#   in version control.
+#   https://pdm.fming.dev/#use-with-ide
+.pdm.toml
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
+#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
+#  and can be added to the global gitignore or merged into this file.  For a more nuclear
+#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
+#.idea/
+
+### Python Patch ###
+# Poetry local configuration file - https://python-poetry.org/docs/configuration/#local-configuration
+poetry.toml
+
+# ruff
+.ruff_cache/
+
+# LSP config files
+pyrightconfig.json
+
+# End of https://www.toptal.com/developers/gitignore/api/go,python
+
+# Custom rules (everything added below won't be overriden by 'Generate .gitignore File' if you use 'Update' option)
+
+
+# ── Project rules ────────────────────────────────────────────────────────────
+# Restored on 2026-07-30. A .gitignore generator overwrote this section, and the
+# working tree then offered a 15 MB binary, the upstream SDK clones and every
+# working note to the first `git add -A`. Anything below the "Custom rules"
+# marker above survives that generator's Update option; anything above does not.
+
+# Build output
+/feint
+/dist/
+
+# Upstream SDK checkouts read by the drift scan (cloned by `mise run upstream:sync`)
+/.upstream/
+
+# Emulator state snapshots
+*.state.json
+
+# Working notes: audits, and the design briefs written for whoever implements a
+# lot. They are honest documents, not secrets — but they address the implementer,
+# they carry dates, and they cite rules by number. A reader who lands on one from
+# a search engine learns the wrong thing about what this project is. docs/ is for
+# the reader; this is for the desk.
+/notes/
+
+# Agent tooling and its briefing. Published once, withdrawn deliberately: they
+# address an assistant working on this repository, not somebody reading or using
+# it, and a contributor should meet CONTRIBUTING.md and docs/architecture.md
+# instead. Ignored rather than merely deleted, so a later session cannot put them
+# back by accident.
+/.claude/
+/CLAUDE.md
+
+# Terraform working files. Two fixtures run terraform in this tree — the
+# conformance one under tools/conformance/, and the host installer under
+# tools/install/ — and both leave the same four things behind:
+#
+#   .terraform/     the downloaded providers. 45 MB in this repository the day
+#                   this rule was written, one of them a provider binary. A
+#                   `git add .` before it existed would have published all of it.
+#   *.tfstate       real state. It is not secret here (the endpoints are fake and
+#                   the machines are local) but a state file is never a source
+#                   artefact, and the habit of committing one is what leaks the
+#                   next one.
+#   *.tfplan        a plan is a diff against a state, useless without it.
+#   crash.log       terraform's panic dump, which carries the whole command line.
+#
+# .terraform.lock.hcl is deliberately NOT ignored: it pins provider versions by
+# hash, so it belongs in the repository for the same reason go.sum would.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+.terraform.tfstate.lock.info
+
+# Demo recordings. The MP4 is rebuilt by `mise run demo:network` and the tape
+# itself says to keep it out of the repository.
+/docs/assets/network.mp4
+
+# Local tooling
+.env
+.DS_Store
+
+# Sandbox artefact: the harness bind-mounts /dev/null here, it is not a project file
+.mcp.json

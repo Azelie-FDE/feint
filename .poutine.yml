@@ -1,0 +1,41 @@
+# Poutine configuration — CI/CD exploitation-chain scanner (boostsecurity.io).
+#
+# Poutine's `github_action_from_unverified_creator_used` rule flags every action
+# whose author is not a Marketplace "verified creator". That signal is useful and
+# stays ON for every other action: it is what catches a typo-squatted or freshly
+# re-registered action slipping into the pipeline.
+#
+# The entries below are acknowledged one purl at a time — never by turning the
+# rule off globally. Each names the workflow that runs it, so a reader can check
+# the claim rather than trust it.
+#
+# This file previously carried three comments describing three actions it did not
+# authorise: the purls had been swapped for this repository's own and the prose
+# had not. A file whose whole job is to grant a trust exemption to *named*
+# actions, and which names the wrong ones, is a supply-chain defect in a project
+# that puts supply chain forward.
+skip:
+  - rule: github_action_from_unverified_creator_used
+    purl:
+      # Google's OSV scanner action, run by .github/workflows/osv-scanner.yml.
+      # Published by google/, pinned to a full commit SHA.
+      - pkg:githubactions/google/osv-scanner-action
+      # Anchore's SBOM action (Syft), run by .github/workflows/sbom.yml and by
+      # release.yml, which attests the SBOM it produces.
+      - pkg:githubactions/anchore/sbom-action
+      # TruffleHog, run by .github/workflows/secrets.yml with
+      # --results=verified --fail, so it gates rather than reports.
+      - pkg:githubactions/trufflesecurity/trufflehog
+      # zizmorcore/zizmor-action was exempted here and is gone: zizmor is now
+      # installed as a release binary with its SLSA provenance verified, like the
+      # three other scanners. An exemption outliving the action it exempts is the
+      # same defect as the wrong purls above, one step later — it grants trust
+      # nobody is using and nobody rereads.
+      #
+      # softprops/action-gh-release, which creates the GitHub Release in
+      # release.yml. It is the one action here that touches the published
+      # artefacts, so it is the one worth restating: it is pinned by SHA, it runs
+      # after every signature and attestation step, and zizmor notes that `gh
+      # release create` would do the same job with no third party at all. That
+      # replacement is worth making; until it is, the exemption is explicit.
+      - pkg:githubactions/softprops/action-gh-release

@@ -1,0 +1,217 @@
+# Everything feint needs to emulate a network, on either family.
+#
+# This role is what docs/install.md documents, and the reason it exists as a role
+# rather than as two shell scripts is the project's own rule: what varies is a
+# field, what does not is shared. Installing Go, wiring Open vSwitch to OVN,
+# pointing Incus at the northbound socket and initialising the daemon are
+# identical everywhere; only the package names and the repository they come from
+# differ, and those live in vars/ per family.
+---
+- name: Read the distribution
+  ansible.builtin.setup:
+    gather_subset: [min, distribution]
+
+- name: Load the facts for this family
+  ansible.builtin.include_vars: "{{ ansible_os_family | lower }}.yml"
+
+- name: Install the runtime and OVN
+  ansible.builtin.include_tasks: "{{ ansible_os_family | lower }}.yml"
+
+# --- Wiring -----------------------------------------------------------------
+#
+# The part nobody guesses, and the part that is the same on every distribution
+# because it is OVN's rather than the packager's. Without both keys,
+# `incus network create --type=ovn` fails with an error naming neither.
+# The unit names follow the packages, and on the RHEL family the packages are
+# versioned: openvswitch is openvswitch3.5 and its unit with it, while
+# ovn-northd and ovn-controller keep their plain names. So the list is what the
+# machine actually has rather than what a variable guessed — measured, after a
+# run failed on "Could not find the requested service openvswitch" on a host
+# where OVN was installed and working.
+- name: Which of the expected units exist here
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      systemctl list-unit-files --no-legend 2>/dev/null |
+        awk '{print $1}' | sed 's/\.service$//' |
+        grep -E '^(openvswitch-switch|openvswitch[0-9.]*|ovs-vswitchd|ovn-northd|ovn-controller|ovn-central|ovn-host)$' |
+        sort -u || true
+  args:
+    # /bin/sh is dash on Debian and Ubuntu, and dash has no `set -o pipefail` —
+    # "Illegal option -o pipefail", which reads like a syntax error in the script
+    # rather than a shell that does not have the option. Naming bash is the fix;
+    # dropping pipefail would be the wrong one, since the whole point is to catch
+    # a failing command in the middle of the pipe.
+    executable: /bin/bash
+  register: feint_host_units
+  changed_when: false
+  when: feint_host_want_ovn | bool
+  # grep exits 1 when it matches nothing, and `set -o pipefail` turns that into
+  # a failed task on a machine where OVN is simply not installed yet. `|| true`
+  # above keeps the empty answer an answer.
+
+- name: Start OVN and Open vSwitch
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: "{{ feint_host_units.stdout_lines | default([]) }}"
+  when: feint_host_want_ovn | bool
+
+- name: Wait for the northbound database socket
+  ansible.builtin.wait_for:
+    path: /run/ovn/ovnnb_db.sock
+    timeout: 60
+  when: feint_host_want_ovn | bool
+
+- name: What Open vSwitch already points at
+  ansible.builtin.command:
+    cmd: ovs-vsctl get open_vswitch . external_ids:ovn-remote
+  register: feint_host_ovs_remote
+  changed_when: false
+  failed_when: false
+  when: feint_host_want_ovn | bool
+
+- name: Point Open vSwitch at the southbound database
+  ansible.builtin.command:
+    cmd: >-
+      ovs-vsctl set open_vswitch .
+      external_ids:ovn-remote=unix:/run/ovn/ovnsb_db.sock
+      external_ids:ovn-encap-type=geneve
+      external_ids:ovn-encap-ip=127.0.0.1
+  changed_when: true
+  when:
+    - feint_host_want_ovn | bool
+    - '"ovnsb_db.sock" not in (feint_host_ovs_remote.stdout | default(""))'
+
+- name: Has Incus been initialised
+  ansible.builtin.command:
+    cmd: incus storage list --format csv
+  register: feint_host_storage
+  changed_when: false
+  failed_when: false
+
+- name: Initialise Incus
+  ansible.builtin.command:
+    cmd: incus admin init --minimal
+  when: feint_host_storage.stdout | trim == ""
+  changed_when: true
+
+# changed_when: false, and not because the task does nothing.
+#
+# Incus accepts this setting and does not read it back: `incus config get
+# network.ovn.northbound_connection` answers empty on a server where it was just
+# set, and `incus config show` does not carry it either. So there is no before
+# to compare against, and a task that claims a change it cannot observe is worse
+# than one that stays quiet — it makes every run look like work happened.
+#
+# Setting it again is harmless: the server takes the same value it already has.
+- name: Point Incus at the northbound database
+  ansible.builtin.command:
+    cmd: incus config set network.ovn.northbound_connection unix:/run/ovn/ovnnb_db.sock
+  changed_when: false
+  when: feint_host_want_ovn | bool
+
+# An OVN network needs an uplink, and the uplink must be a managed bridge
+# carrying ipv4.ovn.ranges. `incus admin init --minimal` creates incusbr0
+# without it, so an OVN network created afterwards is refused for a reason that
+# points at the network rather than at the bridge.
+# The uplink, and this is where an install silently stops being an OVN install.
+#
+# `incus admin init --minimal` gives incusbr0 a random /24, so the address is
+# pinned first: the OVN and DHCP ranges are validated against the *current*
+# address, and a range outside it is refused with "does not fall within any of
+# the allowed networks". Two steps, not one, for the same reason — a single
+# command validates the new ranges against the old address.
+#
+# Neither step may fail quietly. An earlier version of this task carried
+# `failed_when: false`, so every one of these settings was refused and nothing
+# said so; the emulator then reported isolation true, because that capability
+# follows the driver mode rather than a working uplink, and the first attempt to
+# create a subnet failed with "Uplink network doesn't contain 10.190.1.0/24 in
+# its routes". A check that cannot fail is the defect this project exists to
+# avoid.
+- name: What the uplink bridge carries today
+  ansible.builtin.command:
+    cmd: incus network get incusbr0 ipv4.address
+  register: feint_host_uplink_now
+  changed_when: false
+  failed_when: false
+  when: feint_host_want_ovn | bool
+
+- name: Pin the uplink bridge to a predictable block
+  ansible.builtin.command:
+    cmd: incus network set incusbr0 ipv4.address={{ feint_host_uplink_cidr }}
+  changed_when: true
+  when:
+    - feint_host_want_ovn | bool
+    - (feint_host_uplink_now.stdout | default("") | trim) != feint_host_uplink_cidr
+
+- name: Which ranges it carries today
+  ansible.builtin.command:
+    cmd: incus network get incusbr0 ipv4.ovn.ranges
+  register: feint_host_ranges_now
+  changed_when: false
+  failed_when: false
+  when: feint_host_want_ovn | bool
+
+- name: Give it the DHCP and OVN ranges
+  ansible.builtin.command:
+    cmd: >-
+      incus network set incusbr0
+      ipv4.dhcp.ranges={{ feint_host_uplink_dhcp }}
+      ipv4.ovn.ranges={{ feint_host_uplink_ovn }}
+  changed_when: true
+  when:
+    - feint_host_want_ovn | bool
+    - (feint_host_ranges_now.stdout | default("") | trim) != feint_host_uplink_ovn
+
+# --- Go, only if asked ------------------------------------------------------
+#
+# Off by default, because the emulator is shipped as a binary and this role's
+# job is the runtime it needs, not a build environment. It was installed
+# unconditionally while the playbook compiled in place; pushing a cross-built
+# binary made it dead weight — a hundred megabytes and a download per machine,
+# and a prerequisite the documentation listed and nobody needed.
+- name: Install Go, for building in place
+  when: feint_host_want_go | bool
+  block:
+  - name: Is the right Go already installed
+    ansible.builtin.command:
+      cmd: /usr/local/go/bin/go version
+    register: feint_host_installed_go
+    changed_when: false
+    failed_when: false
+
+  - name: Install Go
+    when: "'go' + feint_host_go_version not in (feint_host_installed_go.stdout | default(''))"
+    block:
+      - name: Fetch the published checksum
+        ansible.builtin.uri:
+          url: "https://dl.google.com/go/go{{ feint_host_go_version }}.linux-{{ feint_host_go_arch }}.tar.gz.sha256"
+          return_content: true
+        register: feint_host_go_sha
+
+      - name: Download the tarball, verified against it
+        ansible.builtin.get_url:
+          url: "https://dl.google.com/go/go{{ feint_host_go_version }}.linux-{{ feint_host_go_arch }}.tar.gz"
+          dest: "/tmp/go{{ feint_host_go_version }}.tar.gz"
+          checksum: "sha256:{{ feint_host_go_sha.content | trim }}"
+          mode: "0644"
+
+      - name: Remove any previous installation
+        ansible.builtin.file:
+          path: /usr/local/go
+          state: absent
+
+      - name: Unpack it
+        ansible.builtin.unarchive:
+          src: "/tmp/go{{ feint_host_go_version }}.tar.gz"
+          dest: /usr/local
+          remote_src: true
+
+      - name: Put go on PATH
+        ansible.builtin.file:
+          src: /usr/local/go/bin/go
+          dest: /usr/local/bin/go
+          state: link

@@ -1,0 +1,72 @@
+{
+  "declined": 74,
+  "implemented": 49,
+  "orphans": null,
+  "products": [
+    {
+      "product": "instance",
+      "total": 137,
+      "implemented": 37,
+      "declined": 73,
+      "unknown": 27,
+      "versions": [
+        {
+          "version": "v1",
+          "total": 78,
+          "implemented": 37,
+          "declined": 14,
+          "unknown": 27
+        },
+        {
+          "version": "v2alpha1",
+          "total": 59,
+          "implemented": 0,
+          "declined": 59,
+          "unknown": 0
+        }
+      ]
+    },
+    {
+      "product": "ipam",
+      "total": 10,
+      "implemented": 2,
+      "declined": 1,
+      "unknown": 7,
+      "versions": [
+        {
+          "version": "v1",
+          "total": 9,
+          "implemented": 2,
+          "declined": 0,
+          "unknown": 7
+        },
+        {
+          "version": "v1alpha1",
+          "total": 1,
+          "implemented": 0,
+          "declined": 1,
+          "unknown": 0
+        }
+      ]
+    },
+    {
+      "product": "vpc",
+      "total": 32,
+      "implemented": 10,
+      "declined": 0,
+      "unknown": 22,
+      "versions": [
+        {
+          "version": "v2",
+          "total": 32,
+          "implemented": 10,
+          "declined": 0,
+          "unknown": 22
+        }
+      ]
+    }
+  ],
+  "provider": "scaleway",
+  "total": 179,
+  "unknown": 56
+}

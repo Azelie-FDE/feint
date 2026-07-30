@@ -1,0 +1,681 @@
+package machine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/netip"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Incus backs emulated servers with Incus instances: system containers, or real
+// KVM virtual machines when VM is set.
+//
+// This is what makes the emulator useful beyond the control plane. A shared
+// kernel cannot test a kernel module, a sysctl, a systemd unit that touches the
+// boot path, or anything a hardened image does at startup. `incus launch --vm`
+// gives a genuine machine with its own kernel, booted by QEMU/KVM.
+//
+// It is also the reason the emulated network can be real. Incus managed bridges
+// take the block and the gateway the pack computed, and a NIC takes a fixed
+// address inside it, so the address the API published is the address the machine
+// carries. See docs/limits.md for what the runtime this replaced could not do.
+//
+// The trade is time: a container is up in under a second, a VM takes tens of
+// seconds to boot and to get an address. The driver therefore never blocks on an
+// address; the pack refreshes it on the next read.
+type Incus struct {
+	// Binary is the incus executable.
+	Binary string
+	// Timeout caps every CLI call. Launching a VM is slower than a container,
+	// and pulling an image on a cold host slower still, hence a generous
+	// default.
+	Timeout time.Duration
+	// VM selects real virtual machines over system containers.
+	VM bool
+	// Remote is the image server, "images" by default.
+	Remote string
+	// OVN backs emulated subnets with OVN networks instead of managed bridges,
+	// which makes two subnets separate by construction instead of separated by
+	// reject rules. It requires ovn-central and ovn-host on the host; see
+	// incus_ovn.go for what changes.
+	OVN bool
+	// Uplink is the bridge OVN networks reach the outside through, created on
+	// first use. Empty means DefaultUplinkName.
+	Uplink string
+	// UplinkCIDR is the block the uplink carries. Empty means
+	// DefaultUplinkCIDR.
+	UplinkCIDR string
+
+	// runner replaces the CLI call, and is only ever set by a test. It exists
+	// because a handful of decisions in this driver are invisible to the
+	// conformance suite until they hurt: the default-action keys that must not
+	// reach an OVN NIC cost the guest its addresses, silently and only sometimes,
+	// and a rule set missing from an inherited interface leaves the machine open
+	// on an address nothing published. Those are argument-level facts, and this
+	// is what lets a test read the arguments.
+	//
+	// It proves what the driver sends, never what the runtime accepts. That
+	// second half is the conformance suite's job and cannot be faked.
+	runner func(ctx context.Context, args ...string) ([]byte, error)
+
+	// attachMu serialises interface allocation. Attach reads the device list and
+	// then adds a device under a name it believes free; two concurrent calls
+	// without the lock pick the same name, and the loser's attachment silently
+	// becomes the winner's.
+	attachMu sync.Mutex
+	// uplinkMu serialises edits of the uplink's ipv4.routes, one value shared
+	// by every routed public address.
+	uplinkMu sync.Mutex
+}
+
+// NewIncus returns a driver launching system containers.
+func NewIncus() *Incus {
+	return &Incus{Binary: "incus", Timeout: 120 * time.Second, Remote: "images"}
+}
+
+// NewIncusVM returns a driver launching KVM virtual machines.
+func NewIncusVM() *Incus {
+	d := NewIncus()
+	d.VM = true
+	return d
+}
+
+// NewIncusOVN returns a driver launching system containers on OVN-backed
+// networks. It needs ovn-central and ovn-host installed and wired to the
+// local Open vSwitch; the first network creation says so when they are not.
+func NewIncusOVN() *Incus {
+	d := NewIncus()
+	d.OVN = true
+	return d
+}
+
+// Name implements Driver.
+func (d *Incus) Name() string {
+	switch {
+	case d.OVN && d.VM:
+		return "incus-ovn-vm"
+	case d.OVN:
+		return "incus-ovn"
+	case d.VM:
+		return "incus-vm"
+	default:
+		return "incus"
+	}
+}
+
+// Available implements Driver: it queries the daemon, since an installed client
+// with no reachable server is the common broken case.
+func (d *Incus) Available(ctx context.Context) bool {
+	_, err := d.run(ctx, "list", "--format", "json")
+	return err == nil
+}
+
+// imageRef translates the logical image a pack asks for ("ubuntu:22.04") into an
+// Incus image reference ("images:ubuntu/22.04"). Packs stay runtime-agnostic:
+// they name an operating system, each driver knows how to obtain it.
+func (d *Incus) imageRef(image string) string {
+	if strings.Contains(image, "/") {
+		return image // already an Incus reference, e.g. images:debian/13
+	}
+	remote := d.Remote
+	if remote == "" {
+		remote = "images"
+	}
+	name, version, found := strings.Cut(image, ":")
+	if !found {
+		version = "latest"
+	}
+
+	// The /cloud variant is mandatory, not a preference: it is the one that runs
+	// cloud-init, so it is the only one that can receive the default account and
+	// its keys, and it carries the Incus agent virtual machines need.
+	//
+	// It still ships no ssh daemon. Measured the hard way: the key lands in
+	// /root/.ssh/authorized_keys and nothing answers on port 22. The cloud-config
+	// the pack renders installs openssh-server for that reason. Canonical's own
+	// images would avoid the install, but the `ubuntu:` remote is not configured
+	// on every Incus installation, and depending on it makes the driver fail on
+	// machines where only `images:` exists.
+	return fmt.Sprintf("%s:%s/%s/cloud", remote, name, version)
+}
+
+// Start implements Driver.
+func (d *Incus) Start(ctx context.Context, spec Spec) (Machine, error) {
+	if !safeName.MatchString(spec.Name) {
+		return Machine{}, fmt.Errorf("invalid machine name %q", spec.Name)
+	}
+
+	if _, ok, err := d.Inspect(ctx, spec.Name); err != nil {
+		return Machine{}, err
+	} else if ok {
+		if _, err := d.run(ctx, "start", spec.Name); err != nil &&
+			!strings.Contains(strings.ToLower(err.Error()), "already running") {
+			return Machine{}, fmt.Errorf("start instance %s: %w", spec.Name, err)
+		}
+		return d.inspectOrFail(ctx, spec.Name)
+	}
+
+	args := []string{"launch", d.imageRef(spec.Image), spec.Name}
+	if d.VM {
+		args = append(args, "--vm")
+	}
+	// The primary interface is set at launch: --network creates eth0 on the
+	// managed bridge, --device pins its address. Incus takes the address as a
+	// device key, not as a launch flag, and the two have to be given together
+	// or the NIC comes up on DHCP and the published address becomes a lie.
+	if len(spec.Attachments) > 0 {
+		primary := spec.Attachments[0]
+		if !safeName.MatchString(primary.Network) {
+			return Machine{}, fmt.Errorf("invalid network name %q", primary.Network)
+		}
+		args = append(args, "--network", primary.Network)
+		if primary.Address != "" {
+			args = append(args, "--device", "eth0,ipv4.address="+primary.Address)
+		}
+	}
+	// Labels become user.* config keys, the Incus equivalent of container labels.
+	for k, v := range spec.Labels {
+		args = append(args, "--config", "user."+k+"="+v)
+	}
+	// cloud-init is how a real cloud provisions the default account and its
+	// keys, and Incus feeds it to containers and virtual machines alike. This is
+	// what lets this driver produce a machine you can actually ssh into.
+	if spec.CloudInit != "" {
+		args = append(args, "--config", "cloud-init.user-data="+spec.CloudInit)
+	}
+	for _, e := range spec.Env {
+		args = append(args, "--config", "environment."+e)
+	}
+
+	if _, err := d.run(ctx, args...); err != nil {
+		return Machine{}, fmt.Errorf("launch instance %s from %s: %w", spec.Name, d.imageRef(spec.Image), err)
+	}
+	if err := d.attachExtra(ctx, spec); err != nil {
+		return Machine{}, err
+	}
+	return d.inspectOrFail(ctx, spec.Name)
+}
+
+// attachExtra adds the interfaces beyond the first, which launch cannot carry:
+// it takes one --network. A server with two private NICs is ordinary on
+// Scaleway, so this is not an edge case.
+func (d *Incus) attachExtra(ctx context.Context, spec Spec) error {
+	if len(spec.Attachments) < 2 {
+		return nil
+	}
+	for i, att := range spec.Attachments[1:] {
+		if !safeName.MatchString(att.Network) {
+			return fmt.Errorf("invalid network name %q", att.Network)
+		}
+		device := fmt.Sprintf("eth%d", i+1)
+		args := []string{"config", "device", "add", spec.Name, device, "nic", "network=" + att.Network}
+		if att.Address != "" {
+			args = append(args, "ipv4.address="+att.Address)
+		}
+		if _, err := d.run(ctx, args...); err != nil {
+			return fmt.Errorf("attach instance %s to network %s: %w", spec.Name, att.Network, err)
+		}
+	}
+	return nil
+}
+
+// Attach implements Driver.
+//
+// Two steps, and the second is the one that is easy to miss. Adding the device
+// reserves the address on the managed bridge, which is all `ipv4.address` does:
+// a NIC added to a running machine has no DHCP client on it, so the guest keeps
+// answering on nothing. The address the control plane published would then be a
+// promise nobody keeps, which is the whole defect this emulator exists to avoid.
+// So the interface is brought up inside the guest as well, and a failure there
+// is reported rather than swallowed: the caller is about to publish the address,
+// and its log is the only place an operator can learn the machine never took it.
+//
+// Idempotence is by effect, not by error text: a device already carrying the
+// network is this attachment, and matching "already exists" instead would also
+// swallow the case where a concurrent Attach stole the device name, leaving the
+// machine off a network the control plane says it is on.
+func (d *Incus) Attach(ctx context.Context, name string, att Attachment) error {
+	if !safeName.MatchString(name) {
+		return fmt.Errorf("invalid machine name %q", name)
+	}
+	if !safeName.MatchString(att.Network) {
+		return fmt.Errorf("invalid network name %q", att.Network)
+	}
+
+	d.attachMu.Lock()
+	defer d.attachMu.Unlock()
+
+	devices, err := d.instanceDevices(ctx, name)
+	if err != nil {
+		return fmt.Errorf("inspect %s before attaching: %w", name, err)
+	}
+
+	device := ""
+	for devName, cfg := range devices.own {
+		if cfg["type"] == "nic" && cfg["network"] == att.Network {
+			device = devName
+			break
+		}
+	}
+	switch {
+	case device == "":
+		device = freeInterface(devices.expanded)
+		args := []string{"config", "device", "add", name, device, "nic", "network=" + att.Network}
+		if att.Address != "" {
+			args = append(args, "ipv4.address="+att.Address)
+		}
+		if _, err := d.run(ctx, args...); err != nil {
+			return fmt.Errorf("attach %s to network %s: %w", name, att.Network, err)
+		}
+	case att.Address != "" && devices.own[device]["ipv4.address"] != att.Address:
+		// Re-attached at a different address: the reservation must follow, or
+		// the bridge keeps handing the machine the address of a previous life.
+		if _, err := d.run(ctx, "config", "device", "set", name, device, "ipv4.address="+att.Address); err != nil {
+			return fmt.Errorf("move %s to %s on network %s: %w", name, att.Address, att.Network, err)
+		}
+	}
+
+	if att.Address != "" && att.PrefixLen > 0 {
+		// The device is attached by now, whatever happens next. Configuring it
+		// inside the guest needs a running machine, and attaching to a stopped
+		// one is the ordinary Terraform order — attach, then power on — where
+		// the address is applied at boot instead. Reporting that as a failed
+		// attachment sent operators looking for a problem that was not one.
+		err := d.configureGuestAddress(ctx, name, device, fmt.Sprintf("%s/%d", att.Address, att.PrefixLen))
+		if err != nil && !isNotRunning(err) {
+			return err
+		}
+		// On OVN the peered subnets are only reachable through the network's
+		// router, and a statically configured NIC knows nothing about them.
+		if d.OVN {
+			return d.installGuestPrivateRoutes(ctx, name, att.Network, device)
+		}
+	}
+	return nil
+}
+
+// configureGuestAddress gives the guest the address its NIC device reserves,
+// and brings the interface up. Reserving an address on the network is not the
+// same as the guest carrying it: a NIC added or re-added on a running machine
+// has no DHCP client on it, so the driver configures it directly.
+func (d *Incus) configureGuestAddress(ctx context.Context, name, device, cidr string) error {
+	if _, err := d.run(ctx, "exec", name, "--", "ip", "address", "add", cidr, "dev", device); err != nil &&
+		// "file exists" is the address already being there, which is the
+		// outcome this call wants.
+		!strings.Contains(strings.ToLower(err.Error()), "file exists") {
+		return fmt.Errorf("give %s to %s inside the guest: %w", cidr, name, err)
+	}
+	if _, err := d.run(ctx, "exec", name, "--", "ip", "link", "set", device, "up"); err != nil {
+		return fmt.Errorf("bring %s up inside %s: %w", device, name, err)
+	}
+	return nil
+}
+
+// instanceView is one machine's devices: its own, and the ones a profile adds.
+type instanceView struct {
+	own      map[string]map[string]string
+	expanded map[string]map[string]string
+}
+
+// instanceDevices reads both device sets in one call. Attach reuses and edits
+// only own devices, because profile devices belong to the operator; free names
+// are picked against the expanded set, because a profile's eth0 is just as taken.
+func (d *Incus) instanceDevices(ctx context.Context, name string) (instanceView, error) {
+	out, err := d.run(ctx, "query", "/1.0/instances/"+name)
+	if err != nil {
+		return instanceView{}, err
+	}
+	var raw struct {
+		Devices         map[string]map[string]string `json:"devices"`
+		ExpandedDevices map[string]map[string]string `json:"expanded_devices"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return instanceView{}, fmt.Errorf("decode devices of %s: %w", name, err)
+	}
+	return instanceView{own: raw.Devices, expanded: raw.ExpandedDevices}, nil
+}
+
+// freeInterface returns the first ethN no device uses. Interface names are what
+// the guest sees, so they have to look like interface names; deriving one from
+// the network name produces something no init script recognises. The match is
+// on the exact name: a substring check would let an existing eth10 shadow eth1.
+func freeInterface(devices map[string]map[string]string) string {
+	for i := 1; i < 64; i++ {
+		candidate := fmt.Sprintf("eth%d", i)
+		if _, used := devices[candidate]; !used {
+			return candidate
+		}
+	}
+	return "eth63"
+}
+
+// EnsureNetwork implements Driver. It creates a managed bridge carrying the
+// block the pack computed — or an OVN network in OVN mode — and succeeds when
+// the network is already there.
+//
+// Incus wants the gateway address with the block's mask, not the block itself,
+// so "10.0.0.0/24" with gateway "10.0.0.1" becomes ipv4.address=10.0.0.1/24.
+// IPv6 is turned off rather than left to the runtime: an emulated subnet
+// publishes the addresses it allocated, and an unannounced IPv6 address on the
+// same NIC is a second address the control plane knows nothing about.
+func (d *Incus) EnsureNetwork(ctx context.Context, spec NetworkSpec) error {
+	if !safeName.MatchString(spec.Name) {
+		return fmt.Errorf("invalid network name %q", spec.Name)
+	}
+	// Caught here rather than left to the runtime: Incus answers "Network
+	// interface is too long", which says nothing about which name to fix.
+	if len(spec.Name) > MaxNetworkNameLen {
+		return fmt.Errorf("network name %q is %d characters, the limit is %d (use NetworkName)",
+			spec.Name, len(spec.Name), MaxNetworkNameLen)
+	}
+	address, err := gatewayAddress(spec.CIDR, spec.Gateway)
+	if err != nil {
+		return err
+	}
+	wantType := "bridge"
+	if d.OVN {
+		wantType = "ovn"
+	}
+	// An existing network is only "ensured" if it carries the block asked for,
+	// as the type the mode wants. Reusing one that answers to the same name
+	// with another block would give every machine on it an address outside the
+	// subnet the API published; reusing a bridge in OVN mode would quietly give
+	// up the isolation the mode exists for.
+	if out, err := d.run(ctx, "query", "/1.0/networks/"+spec.Name); err == nil {
+		var existing struct {
+			Type   string            `json:"type"`
+			Config map[string]string `json:"config"`
+		}
+		if err := json.Unmarshal(out, &existing); err != nil {
+			return fmt.Errorf("decode network %s: %w", spec.Name, err)
+		}
+		if existing.Type != wantType {
+			return fmt.Errorf("network %s already exists as %s, not %s; refusing to reuse it",
+				spec.Name, existing.Type, wantType)
+		}
+		if got := existing.Config["ipv4.address"]; got != address {
+			return fmt.Errorf("network %s already exists carrying %s, not %s; refusing to reuse it",
+				spec.Name, got, address)
+		}
+		return nil
+	} else if !isNotFound(err) {
+		return fmt.Errorf("inspect network %s: %w", spec.Name, err)
+	}
+
+	args := []string{"network", "create", spec.Name}
+	if d.OVN {
+		// The uplink is what an OVN network draws its router address from;
+		// without one the create is refused outright.
+		if err := d.ensureUplink(ctx); err != nil {
+			return err
+		}
+		// The block has to be delegated before the network that carries it: an
+		// OVN network outside its uplink's routes is refused outright.
+		if err := d.delegateRoute(ctx, spec.CIDR); err != nil {
+			return err
+		}
+		args = append(args, "--type=ovn", "network="+d.uplinkName())
+	}
+	args = append(args,
+		"ipv4.address="+address,
+		"ipv4.nat="+strconv.FormatBool(spec.NAT),
+		"ipv6.address=none",
+	)
+	for k, v := range spec.Labels {
+		args = append(args, "user."+k+"="+v)
+	}
+	if _, err := d.run(ctx, args...); err != nil {
+		return fmt.Errorf("create network %s (%s): %w", spec.Name, address, err)
+	}
+	return nil
+}
+
+// RemoveNetwork implements Driver. Incus refuses to delete a network still in
+// use, and that refusal is propagated rather than forced: a subnet whose
+// machines are still running must not be deletable, which is what the client
+// expects and what a DependencyViolation is for.
+//
+// A peering counts as "in use" too, and that one is not the client's business:
+// the emulator created it, so it goes first, and only then is a remaining
+// refusal a real dependency. The retry is deliberate — dropping the peers of a
+// network whose machines block the delete anyway would still be undone by the
+// next reconciliation, so nothing is lost by trying.
+func (d *Incus) RemoveNetwork(ctx context.Context, name string) error {
+	// Ours, or nothing happens. This path had no check at all, not even safeName,
+	// and a restored state names the network it deletes.
+	if !safeName.MatchString(name) || !ownedNetwork(name) {
+		return fmt.Errorf("refusing to delete network %q: not one the emulator created", name)
+	}
+	if _, err := d.run(ctx, "network", "delete", name); err != nil {
+		if isNotFound(err) {
+			return nil
+		}
+		if d.OVN && strings.Contains(strings.ToLower(err.Error()), "in use") {
+			if peers, peersErr := d.networkPeers(ctx, name); peersErr == nil && len(peers) > 0 {
+				for _, peer := range peers {
+					_, _ = d.run(ctx, "network", "peer", "delete", name, peer.Name)
+				}
+				if _, err := d.run(ctx, "network", "delete", name); err == nil || isNotFound(err) {
+					return nil
+				}
+			}
+		}
+		return fmt.Errorf("delete network %s: %w", name, err)
+	}
+	return nil
+}
+
+// gatewayAddress renders the gateway in the form Incus expects. An empty
+// gateway defaults to the first usable address of the block, which is what
+// every cloud does and what the pack's allocator reserves.
+func gatewayAddress(cidr, gateway string) (string, error) {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return "", fmt.Errorf("parse network CIDR %q: %w", cidr, err)
+	}
+	addr := prefix.Masked().Addr().Next()
+	if gateway != "" {
+		addr, err = netip.ParseAddr(gateway)
+		if err != nil {
+			return "", fmt.Errorf("parse network gateway %q: %w", gateway, err)
+		}
+		if !prefix.Contains(addr) {
+			return "", fmt.Errorf("gateway %s is outside %s", gateway, cidr)
+		}
+	}
+	return fmt.Sprintf("%s/%d", addr, prefix.Bits()), nil
+}
+
+// Stop implements Driver.
+func (d *Incus) Stop(ctx context.Context, name string) error {
+	if !safeName.MatchString(name) {
+		return fmt.Errorf("refusing to stop %q: not a name this emulator creates", name)
+	}
+	if _, ok, err := d.Inspect(ctx, name); err != nil || !ok {
+		return err
+	}
+	if _, err := d.run(ctx, "stop", "--force", name); err != nil {
+		return fmt.Errorf("stop instance %s: %w", name, err)
+	}
+	return nil
+}
+
+// Remove implements Driver.
+//
+// Stopped first, then deleted, so a machine still initialising is torn down in
+// order rather than deleted under its own init. This does not prevent the
+// transient ERROR rows in `incus list`: those are the daemon racing any stop of
+// a running instance — while the stop operation holds the instance lock the
+// daemon still answers "Running", a concurrent list walks /proc of the dead
+// init, fails to render the state, and falls back to a bare ERROR placeholder
+// until the stop completes (measured on incus 7.2, and visible in the daemon's
+// own instances_get.go). The watch stream explains it in our log instead.
+func (d *Incus) Remove(ctx context.Context, name string) error {
+	// Checked here and not only at creation: the name reaches this function from
+	// the store, and the store can be replaced wholesale over PUT /_feint/state.
+	// Without this, a crafted snapshot chose which instance the operator's own
+	// credentials would delete.
+	if !safeName.MatchString(name) {
+		return fmt.Errorf("refusing to remove %q: not a name this emulator creates", name)
+	}
+	if _, err := d.run(ctx, "stop", "--force", name); err != nil && !isNotFound(err) {
+		// Not fatal: an instance that refuses to stop must still be deletable,
+		// which is what --force below is for.
+		_ = err
+	}
+	if _, err := d.run(ctx, "delete", "--force", name); err != nil {
+		// Asked, not guessed: a delete can fail for reasons whose message also
+		// contains "not found" ("Storage pool not found" was one), and treating
+		// those as success left the instance running while the caller believed
+		// it gone.
+		if gone, checkErr := d.gone(ctx, "/1.0/instances/"+name); checkErr == nil && gone {
+			return nil
+		}
+		return fmt.Errorf("delete instance %s: %w", name, err)
+	}
+	return nil
+}
+
+// gone reports whether the object at the endpoint no longer exists, by asking
+// the daemon rather than by reading its prose.
+func (d *Incus) gone(ctx context.Context, endpoint string) (bool, error) {
+	if _, err := d.run(ctx, "query", endpoint); err != nil {
+		if isNotFound(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	return false, nil
+}
+
+// WaitRunning blocks until the machine is up and carries an address, or until
+// the context is done.
+//
+// Start deliberately does not wait: a virtual machine takes tens of seconds to
+// boot, and an API call must not. But a caller that needs to talk to the machine
+// does have to wait for it, and polling in a shell script with sleep is how a
+// suite becomes both slow and flaky. Whoever needs readiness asks for it.
+func (d *Incus) WaitRunning(ctx context.Context, name string) (Machine, error) {
+	const interval = 250 * time.Millisecond
+
+	for {
+		machine, ok, err := d.Inspect(ctx, name)
+		switch {
+		case err != nil:
+			return Machine{}, err
+		case ok && machine.Running && machine.IP != "":
+			return machine, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return Machine{}, fmt.Errorf("waiting for %s: %w", name, ctx.Err())
+		case <-time.After(interval):
+		}
+	}
+}
+
+// Inspect implements Driver. An instance that is running but has not obtained an
+// address yet reports an empty IP rather than an error: a booting VM is a normal
+// state, not a failure.
+func (d *Incus) Inspect(ctx context.Context, name string) (Machine, bool, error) {
+	// Read-only, and checked anyway: a name beginning with `-` is read by incus
+	// as a flag, so even a list can be turned into something else.
+	if !safeName.MatchString(name) {
+		return Machine{}, false, nil
+	}
+	out, err := d.run(ctx, "list", name, "--format", "json")
+	if err != nil {
+		if isNotFound(err) {
+			return Machine{}, false, nil
+		}
+		return Machine{}, false, fmt.Errorf("list instance %s: %w", name, err)
+	}
+
+	var instances []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+		State  struct {
+			Network map[string]struct {
+				Addresses []struct {
+					Family  string `json:"family"`
+					Address string `json:"address"`
+					Scope   string `json:"scope"`
+				} `json:"addresses"`
+			} `json:"network"`
+		} `json:"state"`
+	}
+	if err := json.Unmarshal(out, &instances); err != nil {
+		return Machine{}, false, fmt.Errorf("decode instance list for %s: %w", name, err)
+	}
+
+	// `incus list <name>` matches by prefix, so an exact match is required.
+	for _, in := range instances {
+		if in.Name != name {
+			continue
+		}
+		// Interfaces come back as a map, and a map has no order: publishing the
+		// first one Go happens to visit means publishing a different address
+		// between two reads of the same machine. Sorted, eth1 (the first private
+		// NIC) wins over eth0 only if named so; what matters is that the answer
+		// never changes on its own.
+		names := make([]string, 0, len(in.State.Network))
+		for iface := range in.State.Network {
+			if iface != "lo" {
+				names = append(names, iface)
+			}
+		}
+		slices.Sort(names)
+
+		ip := ""
+		for _, iface := range names {
+			for _, addr := range in.State.Network[iface].Addresses {
+				if addr.Family == "inet" && addr.Scope == "global" {
+					ip = addr.Address
+					break
+				}
+			}
+			if ip != "" {
+				break
+			}
+		}
+		return Machine{
+			Name:    in.Name,
+			ID:      in.Name,
+			IP:      ip,
+			Running: strings.EqualFold(in.Status, "Running"),
+		}, true, nil
+	}
+	return Machine{}, false, nil
+}
+
+func (d *Incus) inspectOrFail(ctx context.Context, name string) (Machine, error) {
+	m, ok, err := d.Inspect(ctx, name)
+	if err != nil {
+		return Machine{}, err
+	}
+	if !ok {
+		return Machine{}, fmt.Errorf("instance %s vanished right after starting", name)
+	}
+	return m, nil
+}
+
+func (d *Incus) run(ctx context.Context, args ...string) ([]byte, error) {
+	if d.runner != nil {
+		return d.runner(ctx, args...)
+	}
+	binary := d.Binary
+	if binary == "" {
+		binary = "incus"
+	}
+	timeout := d.Timeout
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	return runCLI(ctx, binary, timeout, args...)
+}

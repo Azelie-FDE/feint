@@ -1,0 +1,9 @@
+---
+# Debian and Ubuntu both ship Incus, and both ship it too old: Debian 13 carries
+# 6.0.x and Ubuntu 24.04 carries 6.0.0, where NIC ACLs are refused below 6.0.4.
+# A security group then attaches and enforces nothing, which looks exactly like a
+# bug in feint. So the packaging the Incus maintainer publishes is used instead.
+feint_host_incus_packages: [incus, incus-client]
+feint_host_ovn_packages: [ovn-central, ovn-host, openvswitch-switch]
+feint_host_ovn_services: [openvswitch-switch, ovn-central, ovn-host]
+feint_host_zabbly_key_url: https://pkgs.zabbly.com/key.asc

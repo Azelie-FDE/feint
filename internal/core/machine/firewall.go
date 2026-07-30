@@ -1,0 +1,83 @@
+package machine
+
+import "context"
+
+// Firewalls are what makes an emulated security group more than documentation.
+//
+// Every local cloud emulator stores rules and filters nothing. MiniStack says so
+// plainly ("security group rules are stored but never filter traffic"), and
+// floci publishes host ports through socat sidecars while admitting "the source
+// CIDR value itself is not enforced". A test that asserts a port is closed
+// therefore proves nothing anywhere.
+//
+// The contract here is deliberately narrow: describe a rule set, hand it to the
+// runtime, attach it to a machine. What the runtime does with it is its own
+// business, and the emulator reports what it could not do rather than pretending.
+
+// FirewallRule is one rule of an emulated security group.
+//
+// The field names follow the direction they filter: Source matters on the way
+// in, Destination on the way out. Both are CIDR blocks. A rule that names a
+// group of machines rather than a block has to be expanded by the caller, since
+// bridge-backed runtimes have no selector for it.
+type FirewallRule struct {
+	// Direction is "ingress" or "egress".
+	Direction string
+	// Action is "allow", "drop" or "reject". Drop is silent, reject answers.
+	Action string
+	// Protocol is "tcp", "udp", "icmp4", or empty for any.
+	Protocol string
+	// Source is the block traffic comes from, for an ingress rule.
+	Source string
+	// Destination is the block traffic goes to, for an egress rule.
+	Destination string
+	// PortFrom and PortTo bound a TCP or UDP range. Zero means every port.
+	PortFrom, PortTo int
+}
+
+// FirewallSpec is a named rule set, the runtime-side shape of a security group.
+type FirewallSpec struct {
+	// Name identifies the rule set; it must be unique and shell-safe.
+	Name string
+	// DefaultIngress and DefaultEgress are what happens to traffic no rule
+	// matches: "allow" or "drop". A security group carries exactly this, which
+	// is why it is not derived from the rules.
+	DefaultIngress, DefaultEgress string
+	// Rules are evaluated by the runtime, which orders them by action rather
+	// than by position: an emulator that relied on list order would report an
+	// order the runtime does not honour.
+	Rules []FirewallRule
+}
+
+// FirewallBinding is what a machine's interfaces enforce: the rule sets, and
+// what happens to traffic none of them matches.
+//
+// The defaults are carried explicitly because a security group states them, and
+// because runtimes disagree: an Incus NIC denies by default once any rule set is
+// attached, which is right for a restrictive group and wrong for a permissive
+// one.
+type FirewallBinding struct {
+	Names                         []string
+	DefaultIngress, DefaultEgress string
+}
+
+// Firewaller is the optional half of a Driver: a runtime that can enforce rules
+// implements it, one that cannot does not, and the pack degrades to serving the
+// rules as metadata.
+//
+// Kept separate from Driver on purpose. Enforcement is the one capability whose
+// absence a user has to be told about, and a separate interface makes that
+// absence a compile-time fact rather than a silent no-op.
+type Firewaller interface {
+	// EnsureFirewall creates or replaces the rule set as a whole. Replacing
+	// rather than patching is what makes a rule removed upstream disappear here
+	// instead of lingering.
+	EnsureFirewall(ctx context.Context, spec FirewallSpec) error
+	// ApplyFirewall attaches rule sets to every interface of a machine, and
+	// detaches everything when the binding names none.
+	ApplyFirewall(ctx context.Context, machine string, binding FirewallBinding) error
+	// RemoveFirewall deletes the rule set. It must succeed when nothing is
+	// there, and it must fail when the set is still attached rather than
+	// leaving machines with a dangling reference.
+	RemoveFirewall(ctx context.Context, name string) error
+}

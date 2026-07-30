@@ -1,0 +1,54 @@
+# Keeps the `blocked` label equal to the truth of the native issue
+# dependencies, by running tools/issues/sync-blocked.sh whenever an issue
+# closes or reopens.
+#
+# The label exists because the project board cannot see dependencies: the
+# Projects filter language has no qualifier for them (measured 2026-07-30 —
+# the schema exposes Issue.blockedBy, the filter docs list only labels,
+# status, milestone and friends). So "ready to start" is only filterable
+# through a label, and a label maintained by memory is a comment. This
+# workflow is the control: close X-1 and the four batches waiting on it lose
+# `blocked` without anyone remembering to do it.
+#
+# The transition this automates is proven by the script's own reconcile logic,
+# which counts open blockers from the dependency list itself; workflow_dispatch
+# exists so the reconcile can be forced after editing dependencies by hand.
+name: Unblock
+
+on:
+  issues:
+    types: [closed, reopened]
+  workflow_dispatch:
+
+permissions: {}
+
+# Two closes in quick succession reconcile the same labels; queue them rather
+# than let the second run race the first one's edits.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync the blocked label from issue dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # checkout reads the sync script
+      issues: write # the sync adds and removes the blocked label
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Reconcile labels with dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FEINT_PROJECT_REPO: ${{ github.repository }}
+        run: bash tools/issues/sync-blocked.sh

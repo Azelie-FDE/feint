@@ -1,0 +1,64 @@
+name: Scorecard
+
+# OpenSSF Scorecard: an outside-in audit of the repository's supply-chain posture (branch
+# protection, pinned actions, signed releases, dangerous workflow patterns). Published to the code
+# scanning tab so a regression shows up as an alert rather than as a number nobody reads.
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: '31 5 * * 3'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-24.04
+    # The privileged token lives in this protected environment, restricted to
+    # main. This workflow never runs on `pull_request`, so the secret is
+    # unreachable from a fork — which is the only way a token with
+    # Administration rights can be kept on a public repository.
+    environment: Prod
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+          # Branch-Protection cannot be evaluated with the default token when a
+          # repository uses *classic* protection: the check returns -1, an
+          # internal error that is silently dropped from the average rather than
+          # scored. A fine-grained PAT with `Administration: Read` is what
+          # Scorecard documents for that case.
+          #
+          # This repository protects main with a **ruleset**
+          # (.github/rulesets/main.json), which the default GITHUB_TOKEN can
+          # already read — so this token is belt and braces rather than a
+          # requirement, and the workflow keeps working if the secret is ever
+          # removed. It is scoped read-only and reachable only from the
+          # protected `security` environment above.
+          repo_token: ${{ secrets.ADMIN_READ_TOKEN }}
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          sarif_file: results.sarif

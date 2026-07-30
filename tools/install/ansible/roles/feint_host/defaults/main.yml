@@ -1,0 +1,24 @@
+---
+# Whether to install and wire OVN. Off means machines, addresses and a firewall,
+# but two subnets of two different VPCs reach each other — see docs/limits.md.
+feint_host_want_ovn: true
+
+# 1.26.5, because the project needs 1.26 and 1.26.0 was never published: the
+# first run of this role asked for it and got an HTML error page.
+# Whether to install a Go toolchain. Off: feint ships as a binary, and this role
+# installs the runtime it needs rather than a build environment. It was installed
+# unconditionally while the playbook compiled in place; pushing a cross-built
+# binary made it dead weight — a hundred megabytes and a download per machine,
+# and a prerequisite the documentation listed and nobody needed.
+feint_host_want_go: false
+
+feint_host_go_version: "1.26.5"
+feint_host_go_arch: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+
+
+# The uplink block. Pinned rather than left to the random /24 `incus admin init
+# --minimal` picks, because the OVN and DHCP ranges have to sit inside it and a
+# range that does not is refused.
+feint_host_uplink_cidr: "10.108.0.1/24"
+feint_host_uplink_dhcp: "10.108.0.10-10.108.0.99"
+feint_host_uplink_ovn: "10.108.0.100-10.108.0.199"

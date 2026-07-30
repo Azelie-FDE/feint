@@ -1,0 +1,94 @@
+# Trust policy over the pipeline's third-party components: what may be used, from
+# whom, pinned how. This is the job that reads .plumber.yaml, the file that sat
+# unread in the repository until an audit noticed.
+#
+# It runs only in trusted contexts — push to main, weekly, manual — and never on
+# pull_request. That is not caution for its own sake: `branchMustBeProtected`
+# inspects repository settings through the GitHub API, which needs a token with
+# Administration:read, and a secret reachable from a pull_request run is a secret
+# a branch can exfiltrate. The scanners that only read files stayed in
+# workflow-security.yml, where they gate every pull request with no secret at all.
+#
+# It also cannot run from a bare working copy: plumber resolves the provider from
+# the git remote and refuses a checkout without one. That is a property worth
+# keeping — a trust report has to know which repository it is reporting on.
+name: Plumber
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '15 3 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plumber:
+    name: Plumber (trust policy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The privileged token lives in this protected environment, whose
+    # deployment branch policy allows main and nothing else. That policy is
+    # what makes the environment a boundary rather than a label: without it
+    # any branch could declare `environment: Prod` and read the secret.
+    environment: Prod
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Same pattern as actionlint and poutine above: a verified release binary,
+      # not a third-party action. The release also carries an in-toto provenance
+      # (provenance.intoto.jsonl); the checksum is what this step verifies, and
+      # `gh attestation verify` is the stronger check to add when the repository
+      # has a token to spend on it.
+      - name: Install plumber (verified release binary)
+        env:
+          PLUMBER_VERSION: "0.4.22"
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          base="https://github.com/getplumber/plumber/releases/download/v${PLUMBER_VERSION}"
+          asset="plumber-linux-amd64"
+          curl -fsSL -o "${workdir}/${asset}" "${base}/${asset}"
+          curl -fsSL -o "${workdir}/checksums.txt" "${base}/checksums.txt"
+          (cd "${workdir}" && grep " ${asset}$" checksums.txt | sha256sum -c -)
+          sudo install -m 0755 "${workdir}/${asset}" /usr/local/bin/plumber
+          plumber version
+
+      # --min-score B, and the reason is now measured rather than guessed. An
+      # audit ran this exact binary against a clone with a GitHub origin and got
+      # **B, 85/100, with a HIGH finding passing**: zizmorcore/zizmor-action was
+      # missing from the trustedGithubActions list in .plumber.yaml, so the job
+      # whose business is trust policy was itself flagged. That list is fixed.
+      #
+      # Measured again on 2026-07-30, once the remote existed and the action was
+      # replaced by the release binary above: **A, 100.0/100, zero findings at
+      # every severity**. That was with plumber 0.4.12 locally, not the 0.4.22
+      # this job installs, which is the only reason the threshold is still B.
+      # **Tighten to --min-points 100 (the binary's default) once the first green
+      # CI run confirms the score on the pinned version**, and delete this
+      # paragraph when you do. A gate whose threshold nobody revisited is a gate
+      # that drifts back to decoration.
+      - name: Plumber
+        env:
+          # Fine-grained PAT, Administration + Metadata read. Without it the
+          # branch-protection collector returns an empty branch list and
+          # branchMustBeProtected emits nothing — the degraded contract
+          # .plumber.yaml documents, which reads exactly like a pass.
+          GH_TOKEN: ${{ secrets.ADMIN_READ_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ADMIN_READ_TOKEN }}
+        run: plumber analyze --min-score B

@@ -1,0 +1,63 @@
+# Development-time Python tooling for feint. Not the shipped product — the
+# binary is 100% Go and has no dependency at all, deliberately.
+#
+# What Python there is lives under tools/ and extracts the providers' own API
+# descriptions into the contracts the emulator checks itself against. It is
+# linted like the Go for the same reason: it produces a versioned artefact the
+# emulator trusts, so a silent mistake there does not crash — it makes the
+# contract describe an API nobody has.
+#
+# The dependency is declared here so `uv sync` works, and the mise tasks invoke
+# `uv run --with pyyaml` so a fresh checkout needs nothing installed by hand.
+# That matters: the extraction was reproducible only on a machine whose system
+# python happened to carry PyYAML, which the pre-commit hook found the first
+# time it ran under the pinned toolchain.
+[project]
+name = "feint-tools"
+version = "0"
+description = "Development tooling for feint: extracting provider API descriptions into contracts."
+requires-python = ">=3.12"
+dependencies = ["pyyaml"]
+
+[project.optional-dependencies]
+dev = ["ruff", "bandit[toml]"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["tools"]
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I isort, UP pyupgrade, B bugbear, C4 comprehensions, SIM simplify.
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+
+# Commitizen reads the commits and decides the version. It is configured here
+# because a version scheme is a project decision, not a hook's default.
+#
+# What it must never do is invent a place to store the number. RELEASING.md says
+# a release is a tag and nothing else holds the version: `release.yml` stamps the
+# tag into the binary with -ldflags, so any file carrying a version would be a
+# second source able to disagree with the first. `version_provider = "scm"` reads
+# the tags, which is the same source.
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "scm"
+version_scheme = "semver"
+tag_format = "v$version"
+# The CHANGELOG is written, not generated. Its header states why: two kinds of
+# change deserve a line whatever their size — a response shape a client can
+# observe, and a limit that moved — and a generator emitting every commit subject
+# would bury both under refactors. `cz bump` therefore proposes the number and
+# leaves the prose alone.
+update_changelog_on_bump = false
+# Before 1.0, a breaking change moves the minor, which is what RELEASING.md
+# already declares. Without this a single `feat!` would jump 0.1.0 to 1.0.0 and
+# announce a stability nobody promised.
+major_version_zero = true
+
+[tool.bandit]
+# B404/B603/B607 are the subprocess advisories. Nothing here shells out today,
+# but the skips are stated rather than discovered later: this tooling would call
+# git or curl with controlled list-args and shell=False, which is the safe
+# pattern the advisories cannot distinguish from the unsafe one.
+skips = ["B404", "B603", "B607"]

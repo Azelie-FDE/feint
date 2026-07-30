@@ -1,0 +1,46 @@
+# Debian and Ubuntu: Incus from the Zabbly channel, OVN from the distribution.
+---
+- name: Install what the repository setup needs
+  ansible.builtin.apt:
+    name: [ca-certificates, curl, gpg, uidmap]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Place the Zabbly signing key in its own keyring
+  # Its own keyring, never the system trust store: a key in /etc/apt/keyrings
+  # signs the repository that names it and nothing else, where a key in the
+  # global store can vouch for any repository the machine ever adds.
+  ansible.builtin.get_url:
+    url: "{{ feint_host_zabbly_key_url }}"
+    dest: /etc/apt/keyrings/zabbly.asc
+    mode: "0644"
+
+- name: Record the fingerprint of what was just trusted
+  ansible.builtin.command:
+    cmd: gpg --show-keys --with-colons /etc/apt/keyrings/zabbly.asc
+  register: feint_host_zabbly_fingerprint
+  changed_when: false
+
+- name: Show it
+  ansible.builtin.debug:
+    msg: "{{ feint_host_zabbly_fingerprint.stdout_lines | select('match', '^fpr') | first | default('unknown') }}"
+
+- name: Add the Incus repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/zabbly-incus.sources
+    mode: "0644"
+    content: |
+      Enabled: yes
+      Types: deb
+      URIs: https://pkgs.zabbly.com/incus/stable
+      Suites: {{ ansible_distribution_release }}
+      Components: main
+      Architectures: {{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+      Signed-By: /etc/apt/keyrings/zabbly.asc
+
+- name: Install Incus and OVN
+  ansible.builtin.apt:
+    name: "{{ feint_host_incus_packages + (feint_host_ovn_packages if feint_host_want_ovn | bool else []) }}"
+    state: present
+    update_cache: true

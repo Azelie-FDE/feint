@@ -1,0 +1,180 @@
+# Pre-commit hooks for feint. Install: `pre-commit install`. The Go, Python and
+# secret-scanning tools come from mise (`mise install`). Run on everything:
+# `pre-commit run --all-files`.
+#
+# Every hook here mirrors something CI enforces. A hook that CI does not check is
+# a rule only the people with it installed obey; a CI check with no hook is one
+# everybody discovers after pushing.
+
+# `pre-commit install` installs the pre-commit hook and nothing else unless it is
+# told which types to wire. A commit-msg hook declared below and never installed
+# would sit in this file doing nothing on every machine, which is the exact
+# failure this repository keeps finding elsewhere: a control that reads as one.
+# Declaring the types here makes the single documented command enough.
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  # Conventional Commits, checked by the reference implementation rather than by
+  # a regex of our own. The convention is what the version number is derived
+  # from — `cz bump` reads the commits since the last tag and decides the
+  # increment — so a malformed subject is not a style problem, it is a release
+  # that computes the wrong number.
+  #
+  # Pinned to 4.16.5 rather than 4.17.0, which was published yesterday: this
+  # repository gives a new release fourteen days before adopting it
+  # (`.github/dependabot.yml`), and a pin that ignores the project's own cooldown
+  # is a policy nobody applies.
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.16.5
+    hooks:
+      # On commit-msg: refuses the message being written.
+      - id: commitizen
+      # `commitizen-branch` on pre-push is deliberately NOT installed. It checks
+      # `$PRE_COMMIT_FROM_REF..$PRE_COMMIT_TO_REF`, and on the first push of a
+      # branch those refs do not exist yet: git answers "ambiguous argument",
+      # the hook exits 23 and the push is refused. Measured on this repository's
+      # own first push.
+      #
+      # The reflex it would teach is `--no-verify`, which disables every other
+      # hook at the same time — a gate whose failure mode is "turn them all off"
+      # is worse than no gate. What it would have caught is already caught twice:
+      # by the commit-msg hook as each message is written, and by the Commits
+      # workflow over every subject a pull request adds.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # The contract artefacts are the large files here, and they are meant to
+        # be: contracts/exoscale.json is the whole of their API description.
+        args: ['--maxkb=2048']
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # Python: the contract extraction under tools/. It produces a versioned
+  # artefact the emulator trusts, so a silent mistake there does not crash — it
+  # makes the contract describe an API nobody has.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/PyCQA/bandit
+    rev: '1.9.2'
+    hooks:
+      - id: bandit
+        args: ['-c', 'pyproject.toml']
+        additional_dependencies: ['bandit[toml]']
+
+  # Go quality gate — mirrors the CI workflow and the go-production-engineer standard.
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        language: system
+        entry: bash -c 'test -z "$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }'
+        pass_filenames: false
+        files: \.go$
+      - id: go-vet
+        name: go vet
+        language: system
+        entry: bash -c 'go vet ./...'
+        pass_filenames: false
+        files: \.go$
+      - id: golangci-lint
+        name: golangci-lint
+        language: system
+        entry: bash -c 'golangci-lint run ./...'
+        pass_filenames: false
+        files: \.go$
+      # go.sum is deliberately absent: feint has no external dependency, which
+      # is deliberate. Diffing a path that does not exist makes git fail with "no
+      # such path in the working tree", so only go.mod is compared.
+      - id: go-mod-tidy
+        name: go mod tidy
+        language: system
+        entry: bash -c 'go mod tidy && git diff --exit-code go.mod'
+        pass_filenames: false
+        files: ^go\.(mod|sum)$
+
+      # And the absence itself is the check. A go.sum appearing means a
+      # dependency was added, which has to be justified in the pull
+      # request rather than noticed six months later.
+      - id: no-dependency
+        name: no external dependency crept in
+        language: system
+        entry: bash -c 'test ! -f go.sum || { echo >&2 "go.sum appeared - a dependency was added, which has to be justified in the pull request"; false; }'
+        pass_filenames: false
+        files: ^go\.(mod|sum)$
+
+      # The three checks below are this project's own, and each one guards a
+      # mechanism that is silent when it breaks.
+
+      # Every route must declare the upstream operation it serves; a missing one
+      # makes the coverage report understate what the emulator does.
+      - id: routes-declare-operations
+        name: routes declare their upstream operation
+        language: system
+        entry: bash -c 'go test ./internal/core/emulator/ -run TestEveryRouteDeclaresAnOperation'
+        pass_filenames: false
+        files: ^internal/providers/.*\.go$
+
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck --severity=style
+        language: system
+        types: [shell]
+        exclude: '^\\.upstream/'
+
+      # Every generated section, one gate. The pattern lists each source a
+      # generated block reads: miss one and the hook stops firing exactly when
+      # the document goes stale, which is the failure it exists to prevent.
+      # The client matrix reads the conformance workflow and the Terraform
+      # fixture; the route reference reads the packs.
+      - id: readme-coverage
+        name: the generated sections match the artefacts
+        entry: tools/docs/check.sh
+        language: system
+        # go.mod, doctor.go and the Ansible client pins are here because the
+        # prerequisites table is spliced from them. CHANGELOG.md and release.yml
+        # are here because the install commands are: cutting a release moves the
+        # CHANGELOG heading, and the version the pages tell a reader to download
+        # has to move with it rather than a release later.
+        files: '^(README\.md|CHANGELOG\.md|docs/(routes|limits|install)\.md|coverage/.*\.json|contracts/.*\.json|internal/providers/.*\.go|internal/cli/(docs.*|doctor)\.go|go\.mod|\.github/workflows/(conformance|release)\.yml|tools/conformance/scaleway/terraform/main\.tf|tools/install/ansible/roles/feint_clients/defaults/main\.yml)$'
+        pass_filenames: false
+
+      # And it must be an operation the provider's own API description defines,
+      # at the path and method it defines. Drift joins on the name alone and
+      # never looks at the path, which is what an SDK addresses: a route with the
+      # right name at the wrong path was invisible until a client 404ed.
+      - id: routes-match-contract
+        name: routes match the provider's API description
+        language: system
+        entry: bash -c 'go test ./internal/core/emulator/ -run TestEveryRouteMatchesItsContract'
+        pass_filenames: false
+        files: ^(internal/providers/.*\.go|contracts/.*\.json)$
+
+      # A contract edited by hand stops being what the extraction produces, and
+      # the emulator would then validate itself against a description nobody can
+      # reproduce. Same idea as go mod tidy.
+      - id: contracts-are-extracted
+        name: contracts are what the extraction produces
+        language: system
+        entry: bash -c 'mise run contract:update && git diff --exit-code contracts/'
+        pass_filenames: false
+        files: ^(contracts/.*\.json|tools/contract/.*)$
+
+      - id: trufflehog
+        name: TruffleHog (secret scan)
+        # --no-update: never auto-fetch a new binary at hook time (supply-chain hardening).
+        entry: trufflehog git file://. --since-commit HEAD --results=verified --fail --no-update
+        language: system
+        pass_filenames: false

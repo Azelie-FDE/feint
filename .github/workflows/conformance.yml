@@ -1,0 +1,242 @@
+name: Conformance
+
+# Proof by the real clients, not by our own assertions.
+#
+# Unit tests check what we believe the API does. This workflow starts the emulator and points the
+# official Scaleway CLI and the official Terraform provider at it. If they parse our answers, the
+# wire format is right; if they do not, the emulator is wrong no matter what the unit tests say.
+#
+# Runs on every pull request (fast) and nightly (with the whole matrix), so a provider release that
+# changes what it expects from the API surfaces within a day.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '43 3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  clients:
+    name: ${{ matrix.client }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [scw-cli, terraform, opentofu, oapi-cli, exo-cli, probe]
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: '1.26'
+          # No go.sum to key a cache on: the zero-dependency rule keeps this module
+          # dependency-free, and a pre-commit hook fails if the file ever
+          # appears. Pointing the cache at it warned on every run and never
+          # hit, which is a cache that costs and returns nothing.
+          cache: false
+
+      # --contracts turns on the response check: every answer a client provokes
+      # is validated against the provider's own API description, so an invented
+      # field fails the run rather than waiting for somebody to notice.
+      # `start` detaches, records the instance and waits for it to answer, which
+      # is what the `&` plus a forty-iteration curl loop was doing by hand — and
+      # doing worse: that loop could not tell "still starting" from "exited at
+      # once", so a bad flag produced ten seconds of silence and then a timeout
+      # instead of the child's actual error.
+      #
+      # A step that backgrounds a process survives into the following steps of
+      # the same job, which is what this relies on; `stop` in the always() step
+      # below is what keeps it from outliving the job.
+      - name: Build and start the emulator
+        run: |
+          go build -o /tmp/feint ./cmd/feint
+          /tmp/feint start --addr 127.0.0.1:4599 --contracts contracts --timeout 60s
+
+      # Every client below is verified before it runs, and the reason is what
+      # this repository is: a conformance suite is a machine that downloads four
+      # third-party binaries and gives them a shell. A swapped asset there would
+      # be executed on every push, on a runner holding the token that can write
+      # releases. Verified is the only acceptable default.
+      #
+      # Scaleway publishes SHA256SUMS beside its binaries, so the sums come from
+      # upstream rather than from this file.
+      - name: Install the Scaleway CLI
+        if: matrix.client == 'scw-cli'
+        env:
+          SCW_VERSION: '2.56.3'
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          base="https://github.com/scaleway/scaleway-cli/releases/download/v${SCW_VERSION}"
+          asset="scaleway-cli_${SCW_VERSION}_linux_amd64"
+          curl -fsSL -o "${workdir}/${asset}" "${base}/${asset}"
+          curl -fsSL -o "${workdir}/sums" "${base}/SHA256SUMS"
+          (cd "${workdir}" && grep " ${asset}$" sums | sha256sum -c -)
+          sudo install -m 0755 "${workdir}/${asset}" /usr/local/bin/scw
+          scw version
+
+      - name: Run the CLI conformance suite
+        if: matrix.client == 'scw-cli'
+        run: tools/conformance/scaleway/scw-cli.sh http://127.0.0.1:4599
+
+      # The AppImage is the only binary Outscale publishes for it. It needs FUSE
+      # to self-mount, which the runner does not have, so it is extracted and run
+      # from the extraction instead — the documented fallback, and it avoids
+      # installing a kernel module to run a CLI.
+      # Outscale publishes no checksum file with its AppImage, so the digest is
+      # pinned here instead. That is weaker than an upstream sum — it proves the
+      # asset has not changed since somebody looked at it, not that upstream
+      # signed it — and it is the strongest thing available. Bumping OAPI_VERSION
+      # means recomputing OAPI_SHA256, which is the point: the bump becomes a
+      # decision rather than a version string.
+      - name: Install the Outscale CLI
+        if: matrix.client == 'oapi-cli'
+        env:
+          OAPI_VERSION: 'v0.15.0'
+          OAPI_SHA256: '798b9af7db9da9539303732ba55be71ff0bec58aa9ef51751de41b2eeee8138a'
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          curl -fsSL -o "${workdir}/oapi-cli.AppImage" \
+            "https://github.com/outscale/oapi-cli/releases/download/${OAPI_VERSION}/oapi-cli-x86_64.AppImage"
+          echo "${OAPI_SHA256}  ${workdir}/oapi-cli.AppImage" | sha256sum -c -
+          chmod +x "${workdir}/oapi-cli.AppImage"
+          # Extracted rather than self-mounted: the AppImage needs FUSE, which
+          # the runner does not have, and installing a kernel module to run a CLI
+          # is a worse trade than the documented fallback.
+          (cd "${workdir}" && ./oapi-cli.AppImage --appimage-extract >/dev/null)
+          sudo ln -sf "${workdir}/squashfs-root/AppRun" /usr/local/bin/oapi-cli
+          oapi-cli --version
+
+      - name: Run the Outscale CLI conformance suite
+        if: matrix.client == 'oapi-cli'
+        run: tools/conformance/outscale/oapi-cli.sh http://127.0.0.1:4599
+
+      # The Exoscale CLI cannot be redirected by a flag or an environment
+      # variable — only by the `endpoint` key of its own configuration file, and
+      # that value must carry the /v2 suffix. Both facts were measured with a
+      # logging proxy; neither is documented. The suite writes that file itself.
+      - name: Install the Exoscale CLI
+        if: matrix.client == 'exo-cli'
+        env:
+          EXO_VERSION: 'v1.95.6'
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          version="${EXO_VERSION#v}"
+          base="https://github.com/exoscale/cli/releases/download/${EXO_VERSION}"
+          asset="exoscale-cli_${version}_linux_amd64.tar.gz"
+          curl -fsSL -o "${workdir}/${asset}" "${base}/${asset}"
+          curl -fsSL -o "${workdir}/sums" "${base}/exoscale-cli_${version}_checksums.txt"
+          (cd "${workdir}" && grep " ${asset}$" sums | sha256sum -c -)
+          tar -xzf "${workdir}/${asset}" -C "${workdir}" exo
+          sudo install -m 0755 "${workdir}/exo" /usr/local/bin/exo
+          exo version
+
+      - name: Run the Exoscale CLI conformance suite
+        if: matrix.client == 'exo-cli'
+        run: tools/conformance/exoscale/exo-cli.sh http://127.0.0.1:4599
+
+      # The release zip and its checksum, verified before anything runs — not a
+      # key piped from a URL into gpg. The apt route asked this job to trust a
+      # transport for a key that then authorises every package from that
+      # repository, which is a wider grant than "install one binary" needs, and
+      # poutine's unverified_script_exec was right to say so.
+      #
+      # The version is pinned rather than floating: a conformance suite whose
+      # client changes under it reports a difference nobody made.
+      - name: Install Terraform
+        if: matrix.client == 'terraform'
+        env:
+          TERRAFORM_VERSION: '1.13.3'
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          base="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}"
+          asset="terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          curl -fsSL -o "${workdir}/${asset}" "${base}/${asset}"
+          curl -fsSL -o "${workdir}/sums" "${base}/terraform_${TERRAFORM_VERSION}_SHA256SUMS"
+          (cd "${workdir}" && grep " ${asset}$" sums | sha256sum -c -)
+          sudo unzip -o "${workdir}/${asset}" terraform -d /usr/local/bin
+          terraform version
+
+      # This step used to download install-opentofu.sh and run it with
+      # --skip-verify, which is two separate grants: executing a script fetched
+      # over the wire, and then telling it not to check what it installs. Both
+      # were unnecessary — OpenTofu publishes SHA256SUMS with its releases.
+      - name: Install OpenTofu
+        if: matrix.client == 'opentofu'
+        env:
+          TOFU_VERSION: '1.12.5'
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          base="https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}"
+          asset="tofu_${TOFU_VERSION}_linux_amd64.zip"
+          curl -fsSL -o "${workdir}/${asset}" "${base}/${asset}"
+          curl -fsSL -o "${workdir}/sums" "${base}/tofu_${TOFU_VERSION}_SHA256SUMS"
+          (cd "${workdir}" && grep " ${asset}$" sums | sha256sum -c -)
+          sudo unzip -o "${workdir}/${asset}" tofu -d /usr/local/bin
+          tofu version
+          # The fixture script calls `terraform`; OpenTofu is a drop-in for this purpose.
+          sudo ln -sf /usr/local/bin/tofu /usr/local/bin/terraform
+
+      - name: Run the Terraform conformance suite
+        if: matrix.client == 'terraform' || matrix.client == 'opentofu'
+        run: tools/conformance/scaleway/terraform.sh http://127.0.0.1:4599
+
+      # No client at all: every route driven from its provider's own API
+      # description, which is the half of conformance that needs nothing
+      # installed. It proves the protocol and never touches the score.
+      - name: Probe every route against its contract
+        if: matrix.client == 'probe'
+        run: |
+          go build -o /tmp/feint ./cmd/feint
+          /tmp/feint probe --endpoint http://127.0.0.1:4599 --contracts contracts
+
+      # On failure only: the log is the first thing a reader needs then, and the
+      # last thing they want in a green run. A separate step with a native
+      # condition rather than a ${{ }} expansion inside `run:` — this repository
+      # forbids template-into-shell on principle, and the principle does not get
+      # an exception for a value that happens to be safe today.
+      - name: The emulator's log
+        if: failure()
+        run: /tmp/feint logs --addr 127.0.0.1:4599 -n 100 || true
+
+      # What this client drove, and whether anything it drove broke the contract.
+      # The score is per client here, so it reads lower than a local run of the
+      # whole suite; the violations are what fail the job.
+      #
+      # Before the stop, and that ordering is the whole point: score.sh reads
+      # /_feint/conformance from the running emulator and exits 1 when nothing
+      # answers. Stopping first failed this step, and with it every leg of the
+      # matrix, on runs that were otherwise green.
+      - name: Report what was exercised
+        if: always()
+        run: tools/conformance/score.sh http://127.0.0.1:4599
+
+      # Always: a job that leaves the emulator running leaves a process holding a
+      # port on a runner about to be reused.
+      - name: Stop the emulator
+        if: always()
+        run: /tmp/feint stop --addr 127.0.0.1:4599 || true
+
+      - name: Dump the emulator state on failure
+        if: failure()
+        run: |
+          curl -s http://127.0.0.1:4599/_feint/health || true
+          curl -s http://127.0.0.1:4599/_feint/routes || true

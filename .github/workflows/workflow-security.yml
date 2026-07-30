@@ -1,0 +1,214 @@
+# The gate that guards the pipeline itself: zizmor (workflow vulnerabilities),
+# actionlint (syntax, invalid permission scopes, and shellcheck over every run:
+# block) and poutine (CI/CD exploitation chains). None of them needs a secret,
+# which is what lets them run on a pull request from a fork.
+#
+# plumber used to be here and moved to plumber.yml: its branchMustBeProtected
+# control needs a token with Administration:read, and a privileged secret must
+# never be reachable from a pull_request run. A scanner that reads repository
+# settings belongs in a trusted context; one that reads files does not.
+#
+# It exists because the configuration did. .poutine.yml sat in the repository
+# granting trust exemptions to three named actions, and nothing read it — an
+# audit found the three names were wrong, which nobody could have noticed from a
+# file no tool consumes. A configuration without a consumer is a promise of
+# security that nobody keeps.
+#
+# .plumber.yaml was the same defect, one file over: 994 lines of trust policy
+# that no job read. The same audit found it, and this is where it is answered.
+#
+# All four scanners are installed as verified release binaries rather than as
+# third-party actions: the tool that guards the trust boundary must not widen it.
+# "All four" is recent. zizmor was the exception, and the sentence above stood
+# unchanged over its `uses:` line until an audit read the two together.
+name: Workflow security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: Zizmor (workflow static analysis)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # First step of every job: monitor egress and block the runner from being
+      # tampered with. `audit` records outbound calls without failing the run —
+      # the recorded list is what a future `block` policy would be built from.
+      - name: Harden the runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Verified release binary, like the three scanners below. It was the one
+      # exception, installed through zizmorcore/zizmor-action, which contradicted
+      # the header of this file for as long as nobody read the two together: the
+      # scanner that guards the trust boundary was the only one widening it.
+      #
+      # Stronger than the checksum the others verify, and the reason this is not
+      # a downgrade: zizmor publishes no checksums file, but it does publish a
+      # SLSA provenance, so the artefact is checked for authenticity and not only
+      # for integrity. Measured rather than assumed — `gh attestation verify` on
+      # the real asset exits 0, and on a file that is not it exits 1 with a 404
+      # from the attestations API, which is what makes the check a check.
+      - name: Install zizmor (release binary, provenance verified)
+        env:
+          ZIZMOR_VERSION: "1.26.1"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          asset="zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "${workdir}/${asset}" \
+            "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/${asset}"
+          gh attestation verify "${workdir}/${asset}" --repo zizmorcore/zizmor
+          tar -xzf "${workdir}/${asset}" -C "${workdir}" zizmor
+          sudo install -m 0755 "${workdir}/zizmor" /usr/local/bin/zizmor
+          zizmor --version
+
+      # Gate-only (no SARIF upload) so the check also passes on pull requests
+      # from forks, where the token cannot write to code scanning. Findings in
+      # the Security tab come from CodeQL; every scanner here gates on its own
+      # exit code instead, which is what makes the fork case work at all.
+      #
+      # --min-severity low keeps the gate where the action had it. Bare, zizmor
+      # exits 11 on the one informational finding this repository carries
+      # (superfluous-actions on softprops/action-gh-release, which is deliberate:
+      # `gh release` in a run step would not carry the release assets the way the
+      # action does). Gating on informational would make the check red on a
+      # finding nobody intends to act on, which is how a gate becomes decoration.
+      - name: Zizmor
+        run: zizmor --no-progress --persona regular --min-severity low .github/workflows/
+
+  # Workflow syntax gate. actionlint is what refuses an invalid runner label, a
+  # malformed ${{ }} expression or a permission scope that does not exist — the
+  # class of mistake that silently disables a control rather than failing loudly.
+  # It also runs shellcheck over every `run:` block.
+  actionlint:
+    name: Actionlint (workflow syntax)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Verified release binary rather than a third-party action: the scanner
+      # that guards the pipeline must not itself widen the trust boundary. Same
+      # pattern as poutine and plumber below — download, check the published
+      # checksum, install. No piped remote script, no `uses:` to trust.
+      - name: Install actionlint (verified release binary)
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          asset="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "${workdir}/${asset}" "${base}/${asset}"
+          curl -fsSL -o "${workdir}/checksums.txt" "${base}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          (cd "${workdir}" && grep " ${asset}$" checksums.txt | sha256sum -c -)
+          tar -xzf "${workdir}/${asset}" -C "${workdir}" actionlint
+          sudo install -m 0755 "${workdir}/actionlint" /usr/local/bin/actionlint
+          actionlint --version
+
+      - name: Actionlint
+        run: actionlint -color
+
+  # CI/CD exploitation-chain gate. poutine models triggers, permissions and data
+  # flow to surface complete attack scenarios, and flags actions from unverified
+  # creators. Acknowledged false positives live in .poutine.yml, per purl.
+  poutine:
+    name: Poutine (CI/CD exploitation chains)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install poutine (verified release binary)
+        env:
+          POUTINE_VERSION: "1.1.6"
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          base="https://github.com/boostsecurityio/poutine/releases/download/v${POUTINE_VERSION}"
+          asset="poutine_Linux_x86_64.tar.gz"
+          curl -fsSL -o "${workdir}/${asset}" "${base}/${asset}"
+          curl -fsSL -o "${workdir}/checksums.txt" "${base}/poutine_${POUTINE_VERSION}_checksums.txt"
+          (cd "${workdir}" && grep " ${asset}$" checksums.txt | sha256sum -c -)
+          tar -xzf "${workdir}/${asset}" -C "${workdir}" poutine
+          sudo install -m 0755 "${workdir}/poutine" /usr/local/bin/poutine
+          poutine version
+
+      # --fail-on-violation makes this a gate (exit 10) instead of a report.
+      - name: Poutine
+        run: poutine analyze_local . --fail-on-violation --quiet
+
+  # The one control that is not about files: main is protected, and protected the
+  # way this repository declares.
+  #
+  # Audited on 2026-07-29 as the gap nothing covered — "the branch protection is
+  # verified by no gate that runs, and no ruleset is versioned". A ruleset living
+  # only in the web interface is a decision nobody can review, diff or restore;
+  # one living only in a file is a decision nobody applies. This compares the two.
+  #
+  # It needs no privileged token. Rulesets are readable with the default
+  # GITHUB_TOKEN, which is exactly why main is protected by a ruleset rather than
+  # by classic branch protection, whose API demands an Administration-scoped PAT.
+  governance:
+    name: Branch protection matches the declaration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Exit 2 when the live ruleset drifted from .github/rulesets/main.json, the
+      # same code every other drift gate here uses.
+      - name: The live ruleset matches the file
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: tools/governance/ruleset.sh check

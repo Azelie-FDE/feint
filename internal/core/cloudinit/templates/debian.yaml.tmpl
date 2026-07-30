@@ -1,0 +1,37 @@
+#cloud-config
+# Cloud-init Debian pour les machines émulées par feint.
+#
+# Repris des gabarits de dsoxlab (src/dsoxlab/templates/cloud-init/).
+
+hostname: {{ .Hostname }}
+fqdn: {{ .Hostname }}.local
+manage_etc_hosts: true
+preserve_hostname: false
+
+users:
+  - name: {{ .User }}
+{{- if ne .User "root" }}
+    groups: [sudo]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+{{- end }}
+    # lock_passwd: false + passwd: '*' : sshd 9+ (Debian 12 embarque OpenSSH
+    # 9.2) rejette les comptes « locked » (hash préfixé par « ! ») même en
+    # authentification par clé publique. Cloud-init applique lock_passwd: true
+    # par défaut, ce qui met ce « ! » : on force false.
+    lock_passwd: false
+    passwd: "*"
+    ssh_authorized_keys:
+{{- range .AuthorizedKeys }}
+      - {{ . }}
+{{- end }}
+
+disable_root: {{ if eq .User "root" }}false{{ else }}true{{ end }}
+ssh_pwauth: false
+{{ if .InstallSSHD }}
+packages:
+  - openssh-server
+
+runcmd:
+  - [sh, -c, "systemctl enable --now ssh || systemctl enable --now sshd"]
+{{- end }}

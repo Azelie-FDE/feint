@@ -1,0 +1,77 @@
+package scaleway
+
+import (
+	"net/http"
+
+	"github.com/stephrobert/feint/internal/core/emulator"
+)
+
+// The Scaleway SDK decodes errors by reading the "type" field of the body and
+// unmarshalling into a matching struct (scw/custom_errors.go). Emitting the
+// wrong shape turns a clean typed error into an opaque one, and callers that
+// branch on errors.As stop working. Field names below mirror the SDK structs.
+
+// APIError is the wire shape of a Scaleway error.
+type APIError struct {
+	Type         string          `json:"type"`
+	Message      string          `json:"message,omitempty"`
+	Resource     string          `json:"resource,omitempty"`
+	ResourceID   string          `json:"resource_id,omitempty"`
+	CurrentState string          `json:"current_state,omitempty"`
+	Details      []ArgumentError `json:"details,omitempty"`
+}
+
+// ArgumentError is one entry of an invalid_arguments error.
+type ArgumentError struct {
+	ArgumentName string `json:"argument_name"`
+	Reason       string `json:"reason"`
+	HelpMessage  string `json:"help_message,omitempty"`
+}
+
+func writeNotFound(w http.ResponseWriter, kind, id string) {
+	emulator.WriteJSON(w, http.StatusNotFound, APIError{
+		Type:       "not_found",
+		Message:    "resource is not found",
+		Resource:   kind,
+		ResourceID: id,
+	})
+}
+
+func writeInvalidArguments(w http.ResponseWriter, details ...ArgumentError) {
+	emulator.WriteJSON(w, http.StatusBadRequest, APIError{
+		Type:    "invalid_arguments",
+		Message: "invalid argument(s)",
+		Details: details,
+	})
+}
+
+// writeNotEmulated answers a request that landed in Scaleway's URL space with no
+// route to serve it.
+//
+// The type is deliberately not one the SDK knows. unmarshalStandardError maps a
+// recognised type onto a typed error, so answering "not_found" would tell a
+// caller a resource is missing when the truth is that an operation is not
+// served, and errors.As(&ResourceNotFoundError{}) would agree. An unknown type
+// falls through to a plain *ResponseError carrying the type and the message,
+// which is exactly what this is.
+//
+// What matters most is the content type. The SDK reads it first: anything that
+// is not application/json makes it drop the body and set the message to
+// res.Status, so today a caller hitting an unmounted route gets "404 Not Found"
+// and nothing else.
+func writeNotEmulated(w http.ResponseWriter, path string) {
+	emulator.WriteJSON(w, http.StatusNotImplemented, APIError{
+		Type:    "not_emulated",
+		Message: "feint does not serve " + path + "; see /_feint/routes for what it does",
+	})
+}
+
+func writeTransientState(w http.ResponseWriter, kind, id, state string) {
+	emulator.WriteJSON(w, http.StatusConflict, APIError{
+		Type:         "transient_state",
+		Message:      "resource is in a transient state",
+		Resource:     kind,
+		ResourceID:   id,
+		CurrentState: state,
+	})
+}

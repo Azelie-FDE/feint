@@ -1,0 +1,161 @@
+name: Go
+
+# Quality gate for the feint binary: formatting, vet, build, race-tested units, fuzzing,
+# golangci-lint and govulncheck. Mirrors .pre-commit-config.yaml and the go-production-engineer
+# standard. Actions pinned by commit SHA; tools pinned by version.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  quality:
+    name: Build, test, lint, vuln-scan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: '1.26'
+          # No go.sum to key a cache on: the zero-dependency rule keeps this module
+          # dependency-free, and a pre-commit hook fails if the file ever
+          # appears. Pointing the cache at it warned on every run and never
+          # hit, which is a cache that costs and returns nothing.
+          cache: false
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      # Shell is code here: every conformance claim is driven by a bash script,
+      # and the first shellcheck run found a case pattern that had never matched
+      # what it was written to match.
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          # -z and xargs -0 rather than $(git ls-files): a command substitution
+          # word-splits, so a path with a space would be linted as two files that
+          # do not exist. actionlint caught it in this very step, which is the
+          # argument for the step existing.
+          git ls-files -z '*.sh' | xargs -0 shellcheck --severity=style
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      # The README's coverage tables are generated from the committed artefacts.
+      # A route added without regenerating them makes the README claim a surface
+      # the emulator no longer has, which is the failure that made them generated
+      # in the first place. Exit 2 is "out of date", not "broken".
+      - name: The README's coverage tables are current
+        run: tools/docs/check.sh
+
+      - name: go test (race)
+        run: go test -race ./...
+
+      # Fuzz the one input feint does not control: the JSON body a client posts. A panic in a
+      # handler takes down every provider sharing the process, so a crasher must surface in CI
+      # rather than in someone's terminal. Crashers land in testdata/fuzz/ and become permanent
+      # regression tests.
+      - name: go test (fuzz)
+        run: go test ./internal/providers/scaleway/ -run '^$' -fuzz 'FuzzCreateServer' -fuzztime=60s
+
+      - name: golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+          "$(go env GOPATH)/bin/golangci-lint" run ./...
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+  # The three platforms the release builds and nothing used to run.
+  #
+  # `release.yml` publishes four binaries; this job is what stops three of them
+  # from being a claim. The install page says which platforms are *exercised*,
+  # and it reads that from the `runs-on:` labels below rather than from a
+  # sentence somebody wrote: add a runner here and the documentation follows,
+  # remove one and it follows too.
+  #
+  # Free of charge, and that is why the condition is there rather than a
+  # comment promising to enable it later: standard runners are free and
+  # unlimited on public repositories, and billed against the plan's minutes on
+  # private ones. This repository is private until it is published, so the job
+  # skips instead of spending — and starts running by itself on the day the
+  # visibility changes, which is the same guard release.yml already uses for
+  # SLSA provenance and Cosign.
+  #
+  # What it deliberately does not cover: `--vm`. That mode needs an Incus
+  # server, which exists on Linux only — the lxc/incus releases publish
+  # `bin.macos.incus` (the client, the agent, the benchmark) and no server, and
+  # Zabbly packages amd64 and arm64 for Debian alone. So a macOS binary emulates
+  # the three control planes and can never back a server with a real machine.
+  cross:
+    name: Test on ${{ matrix.runner }}
+    if: ${{ !github.event.repository.private }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04-arm
+          - macos-15
+          - macos-15-intel
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        # Linux only: the action installs an eBPF agent and is a no-op that
+        # still costs a minute elsewhere.
+        if: ${{ startsWith(matrix.runner, 'ubuntu') }}
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: '1.26'
+          cache: false
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test (race)
+        run: go test -race ./...
+
+      # The binary has to answer, not merely link. A control plane that builds
+      # and cannot serve is exactly the gap between "built" and "exercised".
+      - name: The emulator answers on this platform
+        run: |
+          set -euo pipefail
+          go build -o feint ./cmd/feint
+          ./feint start --addr 127.0.0.1:4599
+          ./feint status
+          curl -fsS localhost:4599/_feint/health
+          ./feint stop

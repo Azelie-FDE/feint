@@ -1,0 +1,24 @@
+{
+  "declined": 43,
+  "implemented": 20,
+  "orphans": null,
+  "products": [
+    {
+      "product": "oks",
+      "total": 27,
+      "implemented": 0,
+      "declined": 27,
+      "unknown": 0
+    },
+    {
+      "product": "osc",
+      "total": 235,
+      "implemented": 20,
+      "declined": 16,
+      "unknown": 199
+    }
+  ],
+  "provider": "outscale",
+  "total": 262,
+  "unknown": 199
+}

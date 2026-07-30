@@ -1,0 +1,331 @@
+name: Upstream drift
+
+# The automation the whole project hangs on.
+#
+# Provider APIs move constantly: Scaleway added 453 SDK methods and removed 26 over twelve months.
+# Nobody tracks that by hand. Every Monday this job re-reads the upstream SDK, recomputes the
+# coverage baseline, and opens a pull request when something appeared, disappeared, or was silently
+# renamed. An upstream change therefore always lands as a reviewable diff, never as silence.
+#
+# The same check runs on every pull request (without the PR-opening part), so a change that makes
+# the emulator claim an operation that no longer exists upstream fails before merge.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Monday 06:17 UTC
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+# The product list and the per-provider commands live in tools/drift/gate.sh, which
+# `mise run drift:check` also runs. They used to be written here as well, with a
+# narrower product list and no Exoscale at all, so the local gate and this one
+# measured different things — and this job rewrote the baseline with its narrower
+# view. One file, two callers, no way to edit them apart.
+
+jobs:
+  drift:
+    name: Compare with the upstream SDK
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      contracts: ${{ steps.contracts.outputs.changed }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: '1.26'
+          # No go.sum to key a cache on: the zero-dependency rule keeps this module
+          # dependency-free, and a pre-commit hook fails if the file ever
+          # appears. Pointing the cache at it warned on every run and never
+          # hit, which is a cache that costs and returns nothing.
+          cache: false
+
+      # The SDKs are read as source, never imported: no module dependency, no build of upstream code.
+      - name: Checkout the Scaleway SDK
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: scaleway/scaleway-sdk-go
+          path: .upstream/scaleway-sdk-go
+          persist-credentials: false
+
+      - name: Checkout the Outscale SDK
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: outscale/osc-sdk-go
+          path: .upstream/osc-sdk-go
+          persist-credentials: false
+
+      - name: Build feint
+        run: go build -o /tmp/feint ./cmd/feint
+
+      # Fails (exit 2) when a route points at an operation that vanished upstream, or when a new
+      # upstream operation is not in the baseline. On a pull request that is the gate; on the
+      # schedule it is the signal to open a PR.
+      #
+      # Scaleway is restricted to the products the emulator has started; Outscale needs no filter,
+      # its API being one flat namespace per service. Both run even when the first one drifts, so a
+      # single pull request carries everything that moved rather than one provider at a time.
+      #
+      # The output is redirected rather than piped through tee. A pipeline reports the exit code of
+      # its last command, so `feint coverage | tee` returned tee's zero whatever the scan found,
+      # and the gate below — which reads this step's outcome — could never fire.
+      - name: Coverage report
+        id: report
+        continue-on-error: true
+        run: |
+          status=0
+          tools/drift/gate.sh check /tmp/feint > /tmp/drift.txt || status=$?
+          cat /tmp/drift.txt
+          exit $status
+
+      - name: Refresh the baseline
+        run: tools/drift/gate.sh update /tmp/feint
+
+      - name: Detect a change
+        id: diff
+        run: |
+          if git diff --quiet -- coverage/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "no upstream drift" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            { echo '## Upstream drift'; echo '```'; cat /tmp/drift.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The API descriptions, refreshed from what the providers publish today.
+      #
+      # This is a different measurement from the one above, and the difference is
+      # the point: the baseline scan reads a released SDK, the contracts read the
+      # document the provider serves. The document runs ahead — an operation
+      # appears there weeks before it reaches a Go SDK release — so the two drift
+      # apart legitimately, and only watching both catches a response shape that
+      # changed under the emulator.
+      - name: Refresh the API descriptions
+        id: contracts
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          pipx install uv >/dev/null 2>&1 || pip install --quiet uv
+          # Not `mise run`: mise is not installed on a GitHub runner, so this
+          # step failed with "command not found" every week — silently, because
+          # of continue-on-error above, which left the contracts half of the
+          # drift mechanism measuring nothing at all.
+          tools/contract/update.sh
+          if [ -n "$(git status --porcelain contracts/)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo '## The providers'"'"' API descriptions moved'
+              echo '```diff'
+              git diff --stat contracts/
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The triage view, saved for the issue. A flat list of ninety operation
+      # names is not a decision; grouped by API and by subject it usually turns
+      # out to be five, one of which is a whole alpha product nobody will serve.
+      - name: The triage view
+        if: always()
+        continue-on-error: true
+        run: |
+          {
+            /tmp/feint coverage --sdk .upstream/scaleway-sdk-go --products instance,vpc,ipam --format triage
+            /tmp/feint coverage --provider outscale --sdk .upstream/osc-sdk-go --format triage
+            /tmp/feint coverage --provider exoscale --contract contracts/exoscale.json --format triage
+          } > /tmp/triage.txt 2>&1 || true
+
+      - name: Fail the pull request on undecided drift
+        if: github.event_name == 'pull_request' && steps.report.outcome == 'failure'
+        run: |
+          echo "The upstream surface moved and nothing in this PR accounts for it." >&2
+          echo "Run: mise run drift:update, then triage the new operations." >&2
+          exit 1
+
+      # The generated documents travel with the baseline they were generated from.
+      # Uploading coverage/ alone was the whole defect: gate.sh update runs
+      # `feint docs` (see its own comment about staleness), but that output stayed
+      # in this job, `propose` checked out main fresh, and its `git add README.md
+      # docs/` therefore staged nothing. Every drift pull request was born with
+      # last week's numbers and a red `docs --check` — the exact failure both
+      # comments claimed was fixed.
+      - name: Upload the refreshed coverage
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: |
+            coverage/
+            README.md
+            docs/
+
+      # Uploaded when either half moved, because `report` runs on either. Keyed on
+      # the coverage diff alone, a contracts-only week made the download below fail
+      # on a missing artifact and no issue was opened at all — in the one case
+      # where the issue is the only vehicle, `propose` being skipped.
+      - name: Upload the triage view
+        if: steps.diff.outputs.changed == 'true' || steps.contracts.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: triage
+          path: /tmp/triage.txt
+
+  propose:
+    name: Open the drift pull request
+    needs: drift
+    if: github.event_name == 'schedule' && needs.drift.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write        # push the branch
+      pull-requests: write   # open the PR
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Kept, and stated rather than left to the default. This is the one job
+          # in the repository that pushes a branch, so it needs the credentials
+          # checkout leaves behind. The risk that setting matters for — a token
+          # captured into an uploaded artifact — does not apply here: this job
+          # downloads an artifact and uploads none.
+          persist-credentials: true
+
+      # Into the workspace root, not into coverage/: the artifact now carries
+      # coverage/, README.md and docs/ with their paths, so it unpacks over the
+      # checkout exactly where each file belongs.
+      - name: Download the refreshed coverage
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage
+          path: .
+
+      # gh rather than a third-party PR action: one less dependency with write access to the repo.
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch="chore/upstream-drift"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          # The generated documents move with the baseline. Committing only
+          # coverage/ produced a pull request whose README still carried last
+          # week's numbers, so `feint docs --check` failed on it: every drift PR
+          # was born red, which is how a gate becomes something people ignore.
+          git add coverage/ README.md docs/
+          git commit -m "chore(drift): refresh the upstream coverage baseline"
+          # Fetch the branch first: checkout brings only the default branch, so
+          # without a tracking ref --force-with-lease requires that the remote
+          # branch not exist. Week one passed, week two was rejected with "stale
+          # info" — that is, every week the previous pull request was still open,
+          # which is the normal case for triage.
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
+          git push --force-with-lease origin "$branch"
+          if [ -z "$(gh pr list --head "$branch" --json number --jq '.[0].number')" ]; then
+            gh pr create --head "$branch" --title "chore(drift): upstream API surface moved" \
+              --body "The weekly scan found a change in the upstream SDK surface. Review the baseline diff: each added entry is an operation that appeared upstream and has not been triaged yet. Implement it, or add it to the pack's Declined list."
+          fi
+
+  # An issue rather than only a pull request, because the two say different
+  # things. The pull request carries the mechanical part — a refreshed baseline,
+  # ready to merge once somebody has decided. The issue carries the decision
+  # itself, which is the only part a human has to do: for each operation that
+  # appeared upstream, implement it or decline it with a reason.
+  #
+  # A pull request that sits open is invisible in a backlog; an issue is what a
+  # maintainer triages. And the two are linked, so neither is read alone.
+  report:
+    name: Open the drift issue
+    needs: [drift, propose]
+    # always(), because the issue matters most when `propose` failed: a drift
+    # nobody was told about is a drift nobody triages.
+    if: always() && github.event_name == 'schedule' && (needs.drift.outputs.changed == 'true' || needs.drift.outputs.contracts == 'true')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Tolerated when absent, because this job matters most when the one before
+      # it failed: an issue that says "the surface moved, the triage view did not
+      # make it" is worth more than no issue at all.
+      - name: Download the triage view
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: triage
+          path: /tmp/
+
+      # One issue, updated, never a new one per week. A scan that opens an issue
+      # every Monday teaches everyone to close them unread, which is the failure
+      # mode this whole mechanism exists to avoid.
+      - name: Open or update the issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Upstream API surface moved"
+
+          {
+            echo "The weekly scan found operations upstream that nobody has triaged."
+            echo
+            echo "Each one is a decision, not a task: **implement it**, or **add it to the"
+            echo "pack's \`Declined()\` with the reason**. \"Not done yet\" and \"out of scope\""
+            echo "are different answers and only the second belongs in Declined."
+            echo
+            echo "The refreshed baseline is in the pull request tagged \`chore/upstream-drift\`."
+            echo "Merging it without deciding is what makes this report meaningless: the"
+            echo "operations stop being reported and start being forgotten."
+            echo
+            echo "<details><summary>What is undecided, grouped by subject</summary>"
+            echo
+            echo '```'
+            # Never `cat` bare: set -e above would kill the step, and with it the
+            # issue, on the run where the view is missing.
+            if [ -s /tmp/triage.txt ]; then
+              cat /tmp/triage.txt
+            else
+              echo "The triage view did not make it to this run. The scan output is in the run log."
+            fi
+            echo '```'
+            echo
+            echo "</details>"
+            echo
+            echo "[Run]($RUN_URL) · scanned $(date -u +%Y-%m-%d)"
+          } > /tmp/issue.md
+
+          existing="$(gh issue list --state open --label drift --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file /tmp/issue.md
+            echo "commented on #$existing"
+          else
+            # The label may not exist on a fresh repository; create it once.
+            gh label create drift --color FBCA04 \
+              --description "The upstream API surface moved and needs triage" 2>/dev/null || true
+            gh issue create --title "$title" --label drift --body-file /tmp/issue.md
+          fi

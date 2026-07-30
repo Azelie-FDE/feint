@@ -1,0 +1,221 @@
+# Install feint on every supported release, and prove it works there.
+#
+#   ansible-playbook -i inventory.yml provision.yml   # create the machines
+#   ansible-playbook -i inventory.yml site.yml        # install, build, verify
+#   ansible-playbook -i inventory.yml site.yml -l feint-debian-13
+#
+# The last play is the one that matters. Installing Incus proves nothing: what
+# this repository claims is that a subnet created through the emulated API is
+# isolated by construction, and only OVN delivers that. A machine where the
+# packages are present and the wiring is not reports isolation false, and that is
+# a failure here rather than a detail — it is the difference between this setup
+# and one that would have taken two commands.
+---
+- name: Install the runtime, OVN and Go
+  hosts: all
+  become: true
+  roles:
+    - feint_host
+    # The official clients, pinned and verified. feint needs none of them to
+    # run; they are what proves it, since the claim is that they cannot tell the
+    # difference and only they can check that.
+    - feint_clients
+
+- name: Build feint and prove what it can do
+  hosts: all
+  become: true
+  vars:
+    feint_src: /root/feint
+
+  tasks:
+    # The binary, cross-built on the controller, plus the conformance suites.
+    #
+    # Not the source tree and a Go toolchain in every machine. Three reasons, in
+    # order of weight: it is the artefact a user installs, so testing it tests
+    # what they get; a Go build inside each VM costs minutes and the memory that
+    # crashed this station once; and Go stops being a prerequisite of the guide.
+    #
+    # The suites still travel, because they are what proves the emulator — they
+    # are shell and fixtures, not code to compile.
+    - name: Build the binary for the target
+      ansible.builtin.command:
+        chdir: "{{ playbook_dir }}/../../.."
+        cmd: go build -o /tmp/feint-linux-amd64 ./cmd/feint
+      environment:
+        GOOS: linux
+        GOARCH: amd64
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: true
+
+    - name: Pack the conformance suites and the contracts
+      ansible.builtin.command:
+        chdir: "{{ playbook_dir }}/../../.."
+        cmd: tar --create --file /tmp/feint-suites.tar tools/conformance contracts
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: true
+
+    - name: Make room for them
+      ansible.builtin.file:
+        path: "{{ feint_src }}"
+        state: directory
+        mode: "0755"
+
+    # Before the push, not after: a binary left running by an earlier run cannot
+    # be overwritten — "text file busy" — and the failure names the file rather
+    # than the process holding it.
+    - name: Stop anything a previous run left running
+      ansible.builtin.command:
+        cmd: feint stop --addr 127.0.0.1:4599
+      changed_when: true
+      failed_when: false
+
+    - name: Push the binary
+      ansible.builtin.command:
+        cmd: incus file push /tmp/feint-linux-amd64 {{ inventory_hostname }}/usr/local/bin/feint --mode 0755
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Push the suites
+      ansible.builtin.command:
+        cmd: incus file push /tmp/feint-suites.tar {{ inventory_hostname }}{{ feint_src }}/suites.tar
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Unpack them
+      ansible.builtin.unarchive:
+        src: "{{ feint_src }}/suites.tar"
+        dest: "{{ feint_src }}"
+        remote_src: true
+
+    - name: Ask feint what it sees
+      ansible.builtin.command:
+        cmd: feint doctor --vm auto
+      register: feint_doctor
+      changed_when: false
+      failed_when: false
+
+    - name: Show it
+      ansible.builtin.debug:
+        var: feint_doctor.stdout_lines
+
+    # A previous run that failed after starting leaves it running, and `start`
+    # refuses to adopt an instance rather than silently reusing one configured by
+    # an earlier command. That refusal is right; making the play re-runnable is
+    # this task's job, not the command's.
+    - name: Stop anything a previous run left behind
+      ansible.builtin.command:
+        cmd: feint stop --addr 127.0.0.1:4599
+      changed_when: true
+      failed_when: false
+
+    # The suites first, against the control plane. They measure response shapes,
+    # not machines, and running them with a runtime makes every emulated subnet
+    # build a real OVN network — minutes of work to prove nothing the isolation
+    # check below does not prove better.
+    - name: Start the emulator, control plane only
+      ansible.builtin.command:
+        chdir: "{{ feint_src }}"
+        cmd: feint start --addr 127.0.0.1:4599 --vm off --contracts contracts --timeout 60s
+      changed_when: true
+
+    # The whole conformance suite, on this release, with the real clients. The
+    # isolation assertion below proves the network; this proves the API — and it
+    # is the only thing that can, because a unit test never proved a response
+    # shape here.
+    - name: Drive the emulator with every official client
+      ansible.builtin.command:
+        chdir: "{{ feint_src }}"
+        cmd: "{{ item }} http://127.0.0.1:4599"
+      loop:
+        - tools/conformance/scaleway/scw-cli.sh
+        - tools/conformance/scaleway/terraform.sh
+        - tools/conformance/outscale/oapi-cli.sh
+        - tools/conformance/exoscale/exo-cli.sh
+      register: feint_conformance
+      changed_when: false
+
+    - name: What each client proved
+      ansible.builtin.debug:
+        msg: "{{ feint_conformance.results | map(attribute='stdout_lines') | map('last') | list }}"
+
+    - name: Stop the control plane
+      ansible.builtin.command:
+        cmd: feint stop --addr 127.0.0.1:4599
+      changed_when: true
+
+    # And now the runtime, for the one thing only it can answer.
+    - name: Start the emulator on the runtime it found
+      ansible.builtin.command:
+        chdir: "{{ feint_src }}"
+        cmd: feint start --addr 127.0.0.1:4599 --vm auto --contracts contracts --timeout 60s
+      changed_when: true
+
+    - name: Read what the running mode can prove
+      ansible.builtin.uri:
+        url: http://127.0.0.1:4599/_feint/health
+        return_content: true
+      register: feint_health
+
+    # The claim this whole install exists for, and it is made by building
+    # something rather than by reading a flag.
+    #
+    # capabilities.isolation follows the *mode* — incus-ovn isolates by
+    # construction — not the wiring. A machine where OVN is installed and the
+    # uplink is misconfigured reports true and cannot create a single subnet,
+    # which is exactly what happened here before this task existed. So the proof
+    # is a real Net and a real Subnet through the emulated API, which fails
+    # unless OVN is genuinely usable.
+    # Sweep first. The proof below creates a real OVN network, and a run that
+    # left one behind makes the next one fail with a conflict on a block it
+    # cannot see — which reads like the emulator being wrong rather than the
+    # host being dirty. `clean` removes only what the emulator labelled.
+    - name: Sweep what an earlier run left on the host
+      ansible.builtin.command:
+        cmd: feint clean --vm auto
+      changed_when: true
+      failed_when: false
+
+    - name: A Net, through the API, on the real runtime
+      ansible.builtin.uri:
+        url: http://127.0.0.1:4599/api/v1/CreateNet
+        method: POST
+        body_format: json
+        body: {IpRange: "10.191.0.0/16"}
+        status_code: 200
+      register: feint_net
+
+    # Two tasks rather than a loop: the subnet needs the identifier the first
+    # call returned, and a register is not readable from inside the loop that
+    # sets it.
+    - name: And a Subnet inside it, which is what needs OVN to be wired
+      ansible.builtin.uri:
+        url: http://127.0.0.1:4599/api/v1/CreateSubnet
+        method: POST
+        body_format: json
+        body:
+          NetId: "{{ feint_net.json.Net.NetId }}"
+          IpRange: "10.191.4.0/24"
+        status_code: 200
+      register: feint_subnet
+
+    - name: Stop it
+      ansible.builtin.command:
+        cmd: feint stop --addr 127.0.0.1:4599
+      changed_when: true
+
+    - name: Say what this release proved
+      ansible.builtin.assert:
+        that: feint_health.json.capabilities.isolation | bool
+        fail_msg: >-
+          {{ ansible_distribution }} {{ ansible_distribution_version }}: installed,
+          but the runtime cannot isolate two VPCs — OVN is present and not wired.
+        success_msg: >-
+          {{ ansible_distribution }} {{ ansible_distribution_version }}: subnet
+          {{ feint_subnet.json.Subnet.SubnetId }} created on {{ feint_health.json.machines }},
+          and two VPCs cannot reach each other

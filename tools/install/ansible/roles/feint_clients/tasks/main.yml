@@ -1,0 +1,149 @@
+# The official clients the conformance suites drive.
+#
+# feint needs none of these to run — the emulator is one binary with no
+# dependency. They are what *proves* it: the claim this project makes is that the
+# official client cannot tell the difference, and only the official client can
+# check that.
+#
+# Every one is downloaded to a file and verified before it is installed. Nothing
+# is piped into a shell, and no installer script is fetched and executed: this
+# machine ends up running four third-party binaries, and a conformance suite that
+# silently accepts a swapped asset proves the wrong thing about the wrong
+# software.
+---
+- name: jq and unzip, which the suites and the archives need
+  ansible.builtin.package:
+    name: [jq, unzip, curl]
+    state: present
+
+# --- Scaleway: upstream publishes SHA256SUMS ---------------------------------
+- name: The Scaleway CLI
+  block:
+    - name: Fetch its checksum file
+      ansible.builtin.uri:
+        url: "https://github.com/scaleway/scaleway-cli/releases/download/v{{ feint_clients_scw_version }}/SHA256SUMS"
+        return_content: true
+      register: feint_clients_scw_sums
+
+    - name: Install it, verified against that file
+      ansible.builtin.get_url:
+        url: "https://github.com/scaleway/scaleway-cli/releases/download/v{{ feint_clients_scw_version }}/scaleway-cli_{{ feint_clients_scw_version }}_linux_amd64"
+        dest: /usr/local/bin/scw
+        mode: "0755"
+        checksum: "sha256:{{ feint_clients_scw_sums.content | regex_search('([0-9a-f]{64})\\s+scaleway-cli_' ~ feint_clients_scw_version ~ '_linux_amd64', '\\1') | first }}"
+
+# --- Outscale: upstream publishes nothing, so the digest is pinned here -------
+- name: The Outscale CLI
+  block:
+    - name: Download the AppImage, verified against the pinned digest
+      ansible.builtin.get_url:
+        url: "https://github.com/outscale/oapi-cli/releases/download/{{ feint_clients_oapi_version }}/oapi-cli-x86_64.AppImage"
+        dest: /opt/oapi-cli.AppImage
+        mode: "0755"
+        checksum: "sha256:{{ feint_clients_oapi_sha256 }}"
+
+    # Extracted rather than self-mounted: the AppImage needs FUSE, and installing
+    # a kernel module to run a CLI is a worse trade than the documented fallback.
+    - name: Extract it
+      ansible.builtin.command:
+        chdir: /opt
+        cmd: /opt/oapi-cli.AppImage --appimage-extract
+      args:
+        creates: /opt/squashfs-root/AppRun
+
+    # A wrapper, not a symlink. AppRun resolves its own helpers against $APPDIR,
+    # and behind a symlink that variable is empty — the CLI then looks for
+    # /import-ssl.sh and dies on a path that explains nothing. Measured.
+    - name: Put it on PATH
+      ansible.builtin.copy:
+        dest: /usr/local/bin/oapi-cli
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # AppRun needs APPDIR; a symlink does not give it one.
+          APPDIR=/opt/squashfs-root
+          export APPDIR
+          exec "$APPDIR/AppRun" "$@"
+
+# --- Exoscale: upstream publishes a checksums file ---------------------------
+- name: The Exoscale CLI
+  vars:
+    feint_clients_exo_plain: "{{ feint_clients_exo_version | regex_replace('^v', '') }}"
+  block:
+    - name: Fetch its checksum file
+      ansible.builtin.uri:
+        url: "https://github.com/exoscale/cli/releases/download/{{ feint_clients_exo_version }}/exoscale-cli_{{ feint_clients_exo_plain }}_checksums.txt"
+        return_content: true
+      register: feint_clients_exo_sums
+
+    - name: Download the archive, verified against it
+      ansible.builtin.get_url:
+        url: "https://github.com/exoscale/cli/releases/download/{{ feint_clients_exo_version }}/exoscale-cli_{{ feint_clients_exo_plain }}_linux_amd64.tar.gz"
+        dest: /tmp/exoscale-cli.tar.gz
+        mode: "0644"
+        checksum: "sha256:{{ feint_clients_exo_sums.content | regex_search('([0-9a-f]{64})\\s+exoscale-cli_' ~ feint_clients_exo_plain ~ '_linux_amd64.tar.gz', '\\1') | first }}"
+
+    - name: Unpack the binary
+      ansible.builtin.unarchive:
+        src: /tmp/exoscale-cli.tar.gz
+        dest: /usr/local/bin
+        remote_src: true
+        include: [exo]
+        mode: "0755"
+
+# --- OpenTofu and Terraform: both publish SHA256SUMS -------------------------
+- name: OpenTofu
+  when: feint_clients_want_tofu | bool
+  block:
+    - name: Fetch its checksum file
+      ansible.builtin.uri:
+        url: "https://github.com/opentofu/opentofu/releases/download/v{{ feint_clients_tofu_version }}/tofu_{{ feint_clients_tofu_version }}_SHA256SUMS"
+        return_content: true
+      register: feint_clients_tofu_sums
+
+    - name: Download the archive, verified against it
+      ansible.builtin.get_url:
+        url: "https://github.com/opentofu/opentofu/releases/download/v{{ feint_clients_tofu_version }}/tofu_{{ feint_clients_tofu_version }}_linux_amd64.zip"
+        dest: /tmp/tofu.zip
+        mode: "0644"
+        checksum: "sha256:{{ feint_clients_tofu_sums.content | regex_search('([0-9a-f]{64})\\s+tofu_' ~ feint_clients_tofu_version ~ '_linux_amd64.zip', '\\1') | first }}"
+
+    - name: Unpack it
+      ansible.builtin.unarchive:
+        src: /tmp/tofu.zip
+        dest: /usr/local/bin
+        remote_src: true
+        include: [tofu]
+        mode: "0755"
+
+    # The Terraform fixture calls `terraform`; OpenTofu is a drop-in for it.
+    - name: Let the fixture find it under the name it calls
+      ansible.builtin.file:
+        src: /usr/local/bin/tofu
+        dest: /usr/local/bin/terraform
+        state: link
+      when: not feint_clients_want_terraform | bool
+
+- name: Terraform
+  when: feint_clients_want_terraform | bool
+  block:
+    - name: Fetch its checksum file
+      ansible.builtin.uri:
+        url: "https://releases.hashicorp.com/terraform/{{ feint_clients_terraform_version }}/terraform_{{ feint_clients_terraform_version }}_SHA256SUMS"
+        return_content: true
+      register: feint_clients_tf_sums
+
+    - name: Download the archive, verified against it
+      ansible.builtin.get_url:
+        url: "https://releases.hashicorp.com/terraform/{{ feint_clients_terraform_version }}/terraform_{{ feint_clients_terraform_version }}_linux_amd64.zip"
+        dest: /tmp/terraform.zip
+        mode: "0644"
+        checksum: "sha256:{{ feint_clients_tf_sums.content | regex_search('([0-9a-f]{64})\\s+terraform_' ~ feint_clients_terraform_version ~ '_linux_amd64.zip', '\\1') | first }}"
+
+    - name: Unpack it
+      ansible.builtin.unarchive:
+        src: /tmp/terraform.zip
+        dest: /usr/local/bin
+        remote_src: true
+        include: [terraform]
+        mode: "0755"

@@ -1,0 +1,45 @@
+#cloud-config
+# Cloud-init Ubuntu pour les machines émulées par feint.
+#
+# Repris des gabarits de dsoxlab (src/dsoxlab/templates/cloud-init/), qui les a
+# éprouvés sur de vraies VM de lab. Les commentaires viennent de là : ils
+# documentent des pièges vérifiés, pas des préférences.
+
+hostname: {{ .Hostname }}
+fqdn: {{ .Hostname }}.local
+manage_etc_hosts: true
+preserve_hostname: false
+
+users:
+  - name: {{ .User }}
+{{- if ne .User "root" }}
+    groups: [sudo]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+{{- end }}
+    # lock_passwd: false + passwd: '*' : sshd 9+ (Ubuntu 24.04 embarque
+    # OpenSSH 9.x) rejette les comptes « locked » (hash préfixé par « ! »)
+    # même en authentification par clé publique. Cloud-init applique
+    # lock_passwd: true par défaut, ce qui pose ce « ! » : on force false,
+    # et passwd: '*' rend le compte sans mot de passe possible tout en le
+    # laissant débloqué côté shadow.
+    lock_passwd: false
+    passwd: "*"
+    ssh_authorized_keys:
+{{- range .AuthorizedKeys }}
+      - {{ . }}
+{{- end }}
+
+# Scaleway ouvre la session en root ; les clouds qui provisionnent un compte
+# dédié gardent root fermé.
+disable_root: {{ if eq .User "root" }}false{{ else }}true{{ end }}
+ssh_pwauth: false
+{{ if .InstallSSHD }}
+# Les images minimales n'embarquent aucun démon ssh : la clé est posée et rien
+# ne répond sur le port 22. Vérifié sur images:ubuntu/*/cloud.
+packages:
+  - openssh-server
+
+runcmd:
+  - [sh, -c, "systemctl enable --now ssh || systemctl enable --now sshd"]
+{{- end }}

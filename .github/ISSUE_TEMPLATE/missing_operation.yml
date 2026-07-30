@@ -1,0 +1,66 @@
+name: An operation is missing
+description: A route the emulator does not serve, and that you need
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening this: the emulator publishes what it serves and what it
+        deliberately does not. Check both, it takes ten seconds:
+
+        ```bash
+        curl -s localhost:4599/_feint/routes | jq -r '.[].operation' | sort
+        feint coverage --sdk .upstream/scaleway-sdk-go --format triage                        # Scaleway
+        feint coverage --provider outscale --sdk .upstream/osc-sdk-go --format triage        # Outscale
+        feint coverage --provider exoscale --contract contracts/exoscale.json --format triage # Exoscale
+        ```
+
+        An operation listed as **declined** was a decision, and the reason is in
+        the pack's `Declined()`. If the reason no longer holds, say so here —
+        that is a useful issue.
+
+  - type: input
+    id: operation
+    attributes:
+      label: The operation
+      description: Its upstream name, as the SDK or the API description spells it.
+      placeholder: instance/v1/API.CreateSnapshot
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options: [Scaleway, Outscale, Exoscale]
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What you cannot do without it
+      description: |
+        The concrete workflow that stops. "Terraform plan fails on
+        scaleway_instance_snapshot" is actionable; "would be nice for
+        completeness" is not — the surface is over 1700 operations wide and the
+        ones that get built are the ones blocking a real client.
+    validations:
+      required: true
+
+  - type: textarea
+    id: client
+    attributes:
+      label: The client that needs it
+      description: Which official client, and what it prints when it hits the missing route.
+      render: shell
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Checked
+      options:
+        - label: I looked at `/_feint/routes` and it is not served
+          required: true
+        - label: I looked at the pack's `Declined()` and it is not a stated decision — or it is, and I explain above why the reason no longer holds
+          required: true

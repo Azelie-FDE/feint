@@ -1,0 +1,83 @@
+name: An official client did not behave
+description: The emulator answered something a real SDK, CLI or Terraform provider did not accept
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The one thing that helps most: **which client, and what it printed.**
+        This project's whole claim is that the official client cannot tell the
+        difference, so a client that noticed is the report we want — and it
+        outranks the roadmap: the order over there is a guess about what people
+        need, a client that breaks is a fact.
+
+  - type: input
+    id: client
+    attributes:
+      label: The client
+      description: Name and version. `scw version`, `oapi-cli --version`, `exo version`, `terraform version`, or the SDK and its version.
+      placeholder: scw 2.56.3
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: feint version
+      description: The output of `feint version`.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: What you ran
+      description: The commands, from starting the emulator onward. Copy them rather than describing them.
+      render: shell
+      placeholder: |
+        feint serve &
+        export SCW_API_URL=http://127.0.0.1:4599
+        scw instance server create name=demo type=DEV1-S zone=fr-par-1
+    validations:
+      required: true
+
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: The client's output, verbatim. Include the error even if it looks unhelpful — it usually names the field.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What the real cloud does instead
+      description: If you know, say so, and say how you know — their documentation, their SDK's source, or a call against the real API. "Not sure" is a fine answer.
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Machine runtime
+      description: The value of `--vm`, or of FEINT_VM.
+      options:
+        - "off (the default: no real machines)"
+        - incus
+        - incus-vm
+        - incus-ovn
+        - not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: unread
+    attributes:
+      label: Fields the emulator did not read
+      description: |
+        Optional and often decisive. Start the emulator with `--contracts contracts`,
+        reproduce, then paste `curl -s localhost:4599/_feint/conformance | jq .unread_request_fields`.
+        It names the fields your client sent that no handler read — which is the
+        cause more often than not.
+      render: json

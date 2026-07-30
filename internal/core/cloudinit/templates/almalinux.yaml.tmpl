@@ -1,0 +1,40 @@
+#cloud-config
+# Cloud-init famille RHEL (AlmaLinux, Rocky, Fedora) pour feint.
+#
+# Repris des gabarits de dsoxlab (src/dsoxlab/templates/cloud-init/). Deux
+# différences avec Debian : le groupe d'administration est wheel, et l'unité
+# ssh s'appelle sshd.
+
+hostname: {{ .Hostname }}
+fqdn: {{ .Hostname }}.local
+manage_etc_hosts: true
+preserve_hostname: false
+
+users:
+  - name: {{ .User }}
+{{- if ne .User "root" }}
+    groups: [wheel]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+{{- end }}
+    # lock_passwd: false + passwd: '*' : sshd 9+ (AlmaLinux 10) rejette les
+    # comptes « locked » (hash préfixé par « ! ») même en authentification par
+    # clé publique. Cloud-init applique lock_passwd: true par défaut → ce « ! »
+    # apparaît devant tout passwd. On force false ; passwd: '*' rend le compte
+    # sans mot de passe possible mais débloqué côté shadow, donc clé SSH OK.
+    lock_passwd: false
+    passwd: "*"
+    ssh_authorized_keys:
+{{- range .AuthorizedKeys }}
+      - {{ . }}
+{{- end }}
+
+disable_root: {{ if eq .User "root" }}false{{ else }}true{{ end }}
+ssh_pwauth: false
+{{ if .InstallSSHD }}
+packages:
+  - openssh-server
+
+runcmd:
+  - [sh, -c, "systemctl enable --now sshd || systemctl enable --now ssh"]
+{{- end }}

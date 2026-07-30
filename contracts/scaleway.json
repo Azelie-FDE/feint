@@ -1,0 +1,6396 @@
+{
+ "provider": "scaleway",
+ "source": "https://www.scaleway.com/en/developers/api/<product>/schema.yml",
+ "apiVersion": "instance/v1, vpc/v2, ipam/v1, iam/v1alpha1, marketplace/v2",
+ "pathPrefix": "",
+ "closedPolicy": "declared",
+ "operations": {
+  "iam/v1alpha1.AddGroupMember": {
+   "path": "/iam/v1alpha1/groups/{group_id}/add-member",
+   "method": "POST",
+   "request": "iam/v1alpha1.AddGroupMember.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Group"
+  },
+  "iam/v1alpha1.AddGroupMembers": {
+   "path": "/iam/v1alpha1/groups/{group_id}/add-members",
+   "method": "POST",
+   "request": "iam/v1alpha1.AddGroupMembers.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Group"
+  },
+  "iam/v1alpha1.AddSamlCertificate": {
+   "path": "/iam/v1alpha1/saml/{saml_id}/certificates",
+   "method": "POST",
+   "request": "iam/v1alpha1.AddSamlCertificate.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.SamlCertificate"
+  },
+  "iam/v1alpha1.CheckPermissions": {
+   "path": "/iam/v1alpha1/check-permissions",
+   "method": "POST",
+   "request": "iam/v1alpha1.CheckPermissions.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.CheckPermissionsResponse"
+  },
+  "iam/v1alpha1.ClonePolicy": {
+   "path": "/iam/v1alpha1/policies/{policy_id}/clone",
+   "method": "POST",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Policy"
+  },
+  "iam/v1alpha1.CreateAPIKey": {
+   "path": "/iam/v1alpha1/api-keys",
+   "method": "POST",
+   "request": "iam/v1alpha1.CreateAPIKey.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.APIKey"
+  },
+  "iam/v1alpha1.CreateApplication": {
+   "path": "/iam/v1alpha1/applications",
+   "method": "POST",
+   "request": "iam/v1alpha1.CreateApplication.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Application"
+  },
+  "iam/v1alpha1.CreateGroup": {
+   "path": "/iam/v1alpha1/groups",
+   "method": "POST",
+   "request": "iam/v1alpha1.CreateGroup.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Group"
+  },
+  "iam/v1alpha1.CreatePolicy": {
+   "path": "/iam/v1alpha1/policies",
+   "method": "POST",
+   "request": "iam/v1alpha1.CreatePolicy.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Policy"
+  },
+  "iam/v1alpha1.CreateSSHKey": {
+   "path": "/iam/v1alpha1/ssh-keys",
+   "method": "POST",
+   "request": "iam/v1alpha1.CreateSSHKey.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.SSHKey"
+  },
+  "iam/v1alpha1.CreateScimToken": {
+   "path": "/iam/v1alpha1/scim/{scim_id}/tokens",
+   "method": "POST",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.CreateScimTokenResponse"
+  },
+  "iam/v1alpha1.CreateUser": {
+   "path": "/iam/v1alpha1/users",
+   "method": "POST",
+   "request": "iam/v1alpha1.CreateUser.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.User"
+  },
+  "iam/v1alpha1.CreateUserMFAOTP": {
+   "path": "/iam/v1alpha1/users/{user_id}/mfa-otp",
+   "method": "POST",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.MFAOTP"
+  },
+  "iam/v1alpha1.DeleteAPIKey": {
+   "path": "/iam/v1alpha1/api-keys/{access_key}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteApplication": {
+   "path": "/iam/v1alpha1/applications/{application_id}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteGroup": {
+   "path": "/iam/v1alpha1/groups/{group_id}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteJWT": {
+   "path": "/iam/v1alpha1/jwts/{jti}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeletePolicy": {
+   "path": "/iam/v1alpha1/policies/{policy_id}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteSSHKey": {
+   "path": "/iam/v1alpha1/ssh-keys/{ssh_key_id}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteSaml": {
+   "path": "/iam/v1alpha1/saml/{saml_id}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteSamlCertificate": {
+   "path": "/iam/v1alpha1/saml-certificates/{certificate_id}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteScim": {
+   "path": "/iam/v1alpha1/scim/{scim_id}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteScimToken": {
+   "path": "/iam/v1alpha1/scim-tokens/{token_id}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteUser": {
+   "path": "/iam/v1alpha1/users/{user_id}",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.DeleteUserMFAOTP": {
+   "path": "/iam/v1alpha1/users/{user_id}/mfa-otp",
+   "method": "DELETE"
+  },
+  "iam/v1alpha1.EnableOrganizationSaml": {
+   "path": "/iam/v1alpha1/organizations/{organization_id}/saml",
+   "method": "POST",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Saml"
+  },
+  "iam/v1alpha1.EnableOrganizationScim": {
+   "path": "/iam/v1alpha1/organizations/{organization_id}/scim",
+   "method": "POST",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Scim"
+  },
+  "iam/v1alpha1.GetAPIKey": {
+   "path": "/iam/v1alpha1/api-keys/{access_key}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.APIKey"
+  },
+  "iam/v1alpha1.GetApplication": {
+   "path": "/iam/v1alpha1/applications/{application_id}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Application"
+  },
+  "iam/v1alpha1.GetGroup": {
+   "path": "/iam/v1alpha1/groups/{group_id}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Group"
+  },
+  "iam/v1alpha1.GetJWT": {
+   "path": "/iam/v1alpha1/jwts/{jti}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.JWT"
+  },
+  "iam/v1alpha1.GetLog": {
+   "path": "/iam/v1alpha1/logs/{log_id}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Log"
+  },
+  "iam/v1alpha1.GetOrganization": {
+   "path": "/iam/v1alpha1/organizations/{organization_id}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Organization"
+  },
+  "iam/v1alpha1.GetOrganizationSaml": {
+   "path": "/iam/v1alpha1/organizations/{organization_id}/saml",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Saml"
+  },
+  "iam/v1alpha1.GetOrganizationScim": {
+   "path": "/iam/v1alpha1/organizations/{organization_id}/scim",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Scim"
+  },
+  "iam/v1alpha1.GetOrganizationSecuritySettings": {
+   "path": "/iam/v1alpha1/organizations/{organization_id}/security-settings",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.OrganizationSecuritySettings"
+  },
+  "iam/v1alpha1.GetPolicy": {
+   "path": "/iam/v1alpha1/policies/{policy_id}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Policy"
+  },
+  "iam/v1alpha1.GetQuotum": {
+   "path": "/iam/v1alpha1/quota/{quotum_name}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Quotum"
+  },
+  "iam/v1alpha1.GetSSHKey": {
+   "path": "/iam/v1alpha1/ssh-keys/{ssh_key_id}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.SSHKey"
+  },
+  "iam/v1alpha1.GetSamlCertificate": {
+   "path": "/iam/v1alpha1/saml-certificates/{certificate_id}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.SamlCertificate"
+  },
+  "iam/v1alpha1.GetUser": {
+   "path": "/iam/v1alpha1/users/{user_id}",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.User"
+  },
+  "iam/v1alpha1.GetUserConnections": {
+   "path": "/iam/v1alpha1/users/{user_id}/connections",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.GetUserConnectionsResponse"
+  },
+  "iam/v1alpha1.InitiateUserConnection": {
+   "path": "/iam/v1alpha1/users/{user_id}/initiate-connection",
+   "method": "POST",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.InitiateUserConnectionResponse"
+  },
+  "iam/v1alpha1.JoinUserConnection": {
+   "path": "/iam/v1alpha1/users/{user_id}/join-connection",
+   "method": "POST",
+   "request": "iam/v1alpha1.JoinUserConnection.Request"
+  },
+  "iam/v1alpha1.ListAPIKeys": {
+   "path": "/iam/v1alpha1/api-keys",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListAPIKeysResponse"
+  },
+  "iam/v1alpha1.ListApplications": {
+   "path": "/iam/v1alpha1/applications",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListApplicationsResponse"
+  },
+  "iam/v1alpha1.ListGracePeriods": {
+   "path": "/iam/v1alpha1/grace-periods",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListGracePeriodsResponse"
+  },
+  "iam/v1alpha1.ListGroups": {
+   "path": "/iam/v1alpha1/groups",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListGroupsResponse"
+  },
+  "iam/v1alpha1.ListJWTs": {
+   "path": "/iam/v1alpha1/jwts",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListJWTsResponse"
+  },
+  "iam/v1alpha1.ListLogs": {
+   "path": "/iam/v1alpha1/logs",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListLogsResponse"
+  },
+  "iam/v1alpha1.ListPermissionSets": {
+   "path": "/iam/v1alpha1/permission-sets",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListPermissionSetsResponse"
+  },
+  "iam/v1alpha1.ListPolicies": {
+   "path": "/iam/v1alpha1/policies",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListPoliciesResponse"
+  },
+  "iam/v1alpha1.ListQuota": {
+   "path": "/iam/v1alpha1/quota",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListQuotaResponse"
+  },
+  "iam/v1alpha1.ListRules": {
+   "path": "/iam/v1alpha1/rules",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListRulesResponse"
+  },
+  "iam/v1alpha1.ListSSHKeys": {
+   "path": "/iam/v1alpha1/ssh-keys",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListSSHKeysResponse"
+  },
+  "iam/v1alpha1.ListSamlCertificates": {
+   "path": "/iam/v1alpha1/saml/{saml_id}/certificates",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListSamlCertificatesResponse"
+  },
+  "iam/v1alpha1.ListScimTokens": {
+   "path": "/iam/v1alpha1/scim/{scim_id}/tokens",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListScimTokensResponse"
+  },
+  "iam/v1alpha1.ListUsers": {
+   "path": "/iam/v1alpha1/users",
+   "method": "GET",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ListUsersResponse"
+  },
+  "iam/v1alpha1.LockUser": {
+   "path": "/iam/v1alpha1/users/{user_id}/lock",
+   "method": "POST",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.User"
+  },
+  "iam/v1alpha1.RemoveGroupMember": {
+   "path": "/iam/v1alpha1/groups/{group_id}/remove-member",
+   "method": "POST",
+   "request": "iam/v1alpha1.RemoveGroupMember.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Group"
+  },
+  "iam/v1alpha1.RemoveUserConnection": {
+   "path": "/iam/v1alpha1/users/{user_id}/remove-connection",
+   "method": "POST",
+   "request": "iam/v1alpha1.RemoveUserConnection.Request"
+  },
+  "iam/v1alpha1.SetGroupMembers": {
+   "path": "/iam/v1alpha1/groups/{group_id}/members",
+   "method": "PUT",
+   "request": "iam/v1alpha1.SetGroupMembers.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Group"
+  },
+  "iam/v1alpha1.SetOrganizationAlias": {
+   "path": "/iam/v1alpha1/organizations/{organization_id}/alias",
+   "method": "PUT",
+   "request": "iam/v1alpha1.SetOrganizationAlias.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Organization"
+  },
+  "iam/v1alpha1.SetRules": {
+   "path": "/iam/v1alpha1/rules",
+   "method": "PUT",
+   "request": "iam/v1alpha1.SetRules.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.SetRulesResponse"
+  },
+  "iam/v1alpha1.UnlockUser": {
+   "path": "/iam/v1alpha1/users/{user_id}/unlock",
+   "method": "POST",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.User"
+  },
+  "iam/v1alpha1.UpdateAPIKey": {
+   "path": "/iam/v1alpha1/api-keys/{access_key}",
+   "method": "PATCH",
+   "request": "iam/v1alpha1.UpdateAPIKey.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.APIKey"
+  },
+  "iam/v1alpha1.UpdateApplication": {
+   "path": "/iam/v1alpha1/applications/{application_id}",
+   "method": "PATCH",
+   "request": "iam/v1alpha1.UpdateApplication.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Application"
+  },
+  "iam/v1alpha1.UpdateGroup": {
+   "path": "/iam/v1alpha1/groups/{group_id}",
+   "method": "PATCH",
+   "request": "iam/v1alpha1.UpdateGroup.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Group"
+  },
+  "iam/v1alpha1.UpdateOrganizationLoginMethods": {
+   "path": "/iam/v1alpha1/organizations/{organization_id}/login-methods",
+   "method": "PATCH",
+   "request": "iam/v1alpha1.UpdateOrganizationLoginMethods.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Organization"
+  },
+  "iam/v1alpha1.UpdateOrganizationSecuritySettings": {
+   "path": "/iam/v1alpha1/organizations/{organization_id}/security-settings",
+   "method": "PATCH",
+   "request": "iam/v1alpha1.UpdateOrganizationSecuritySettings.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.OrganizationSecuritySettings"
+  },
+  "iam/v1alpha1.UpdatePolicy": {
+   "path": "/iam/v1alpha1/policies/{policy_id}",
+   "method": "PATCH",
+   "request": "iam/v1alpha1.UpdatePolicy.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Policy"
+  },
+  "iam/v1alpha1.UpdateSSHKey": {
+   "path": "/iam/v1alpha1/ssh-keys/{ssh_key_id}",
+   "method": "PATCH",
+   "request": "iam/v1alpha1.UpdateSSHKey.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.SSHKey"
+  },
+  "iam/v1alpha1.UpdateSaml": {
+   "path": "/iam/v1alpha1/saml/{saml_id}",
+   "method": "PATCH",
+   "request": "iam/v1alpha1.UpdateSaml.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.Saml"
+  },
+  "iam/v1alpha1.UpdateUser": {
+   "path": "/iam/v1alpha1/users/{user_id}",
+   "method": "PATCH",
+   "request": "iam/v1alpha1.UpdateUser.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.User"
+  },
+  "iam/v1alpha1.UpdateUserPassword": {
+   "path": "/iam/v1alpha1/users/{user_id}/update-password",
+   "method": "POST",
+   "request": "iam/v1alpha1.UpdateUserPassword.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.User"
+  },
+  "iam/v1alpha1.UpdateUserUsername": {
+   "path": "/iam/v1alpha1/users/{user_id}/update-username",
+   "method": "POST",
+   "request": "iam/v1alpha1.UpdateUserUsername.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.User"
+  },
+  "iam/v1alpha1.ValidateUserMFAOTP": {
+   "path": "/iam/v1alpha1/users/{user_id}/validate-mfa-otp",
+   "method": "POST",
+   "request": "iam/v1alpha1.ValidateUserMFAOTP.Request",
+   "response": "iam/v1alpha1.scaleway.iam.v1alpha1.ValidateUserMFAOTPResponse"
+  },
+  "instance/v1.AttachServerFileSystem": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/attach-filesystem",
+   "method": "POST",
+   "request": "instance/v1.AttachServerFileSystem.Request",
+   "response": "instance/v1.scaleway.instance.v1.AttachServerFileSystemResponse"
+  },
+  "instance/v1.AttachServerVolume": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/attach-volume",
+   "method": "POST",
+   "request": "instance/v1.AttachServerVolume.Request",
+   "response": "instance/v1.scaleway.instance.v1.AttachServerVolumeResponse"
+  },
+  "instance/v1.CheckBlockMigrationOrganizationQuotas": {
+   "path": "/instance/v1/zones/{zone}/block-migration/check-organization-quotas",
+   "method": "POST",
+   "request": "instance/v1.CheckBlockMigrationOrganizationQuotas.Request"
+  },
+  "instance/v1.CreateImage": {
+   "path": "/instance/v1/zones/{zone}/images",
+   "method": "POST",
+   "request": "instance/v1.CreateImage.Request",
+   "response": "instance/v1.scaleway.instance.v1.CreateImageResponse"
+  },
+  "instance/v1.CreateIp": {
+   "path": "/instance/v1/zones/{zone}/ips",
+   "method": "POST",
+   "request": "instance/v1.CreateIp.Request",
+   "response": "instance/v1.scaleway.instance.v1.CreateIpResponse"
+  },
+  "instance/v1.CreatePlacementGroup": {
+   "path": "/instance/v1/zones/{zone}/placement_groups",
+   "method": "POST",
+   "request": "instance/v1.CreatePlacementGroup.Request",
+   "response": "instance/v1.scaleway.instance.v1.CreatePlacementGroupResponse"
+  },
+  "instance/v1.CreatePrivateNIC": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/private_nics",
+   "method": "POST",
+   "request": "instance/v1.CreatePrivateNIC.Request",
+   "response": "instance/v1.scaleway.instance.v1.CreatePrivateNICResponse"
+  },
+  "instance/v1.CreateSecurityGroup": {
+   "path": "/instance/v1/zones/{zone}/security_groups",
+   "method": "POST",
+   "request": "instance/v1.CreateSecurityGroup.Request",
+   "response": "instance/v1.scaleway.instance.v1.CreateSecurityGroupResponse"
+  },
+  "instance/v1.CreateSecurityGroupRule": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}/rules",
+   "method": "POST",
+   "request": "instance/v1.CreateSecurityGroupRule.Request",
+   "response": "instance/v1.scaleway.instance.v1.CreateSecurityGroupRuleResponse"
+  },
+  "instance/v1.CreateServer": {
+   "path": "/instance/v1/zones/{zone}/servers",
+   "method": "POST",
+   "request": "instance/v1.CreateServer.Request",
+   "response": "instance/v1.scaleway.instance.v1.CreateServerResponse"
+  },
+  "instance/v1.CreateSnapshot": {
+   "path": "/instance/v1/zones/{zone}/snapshots",
+   "method": "POST",
+   "request": "instance/v1.CreateSnapshot.Request",
+   "response": "instance/v1.scaleway.instance.v1.CreateSnapshotResponse"
+  },
+  "instance/v1.CreateVolume": {
+   "path": "/instance/v1/zones/{zone}/volumes",
+   "method": "POST",
+   "request": "instance/v1.CreateVolume.Request",
+   "response": "instance/v1.scaleway.instance.v1.CreateVolumeResponse"
+  },
+  "instance/v1.DeleteImage": {
+   "path": "/instance/v1/zones/{zone}/images/{image_id}",
+   "method": "DELETE"
+  },
+  "instance/v1.DeleteIp": {
+   "path": "/instance/v1/zones/{zone}/ips/{ip}",
+   "method": "DELETE"
+  },
+  "instance/v1.DeletePlacementGroup": {
+   "path": "/instance/v1/zones/{zone}/placement_groups/{placement_group_id}",
+   "method": "DELETE"
+  },
+  "instance/v1.DeletePrivateNIC": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/private_nics/{private_nic_id}",
+   "method": "DELETE"
+  },
+  "instance/v1.DeleteSecurityGroup": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}",
+   "method": "DELETE"
+  },
+  "instance/v1.DeleteSecurityGroupRule": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}/rules/{security_group_rule_id}",
+   "method": "DELETE"
+  },
+  "instance/v1.DeleteServer": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}",
+   "method": "DELETE"
+  },
+  "instance/v1.DeleteServerUserData": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/user_data/{key}",
+   "method": "DELETE"
+  },
+  "instance/v1.DeleteSnapshot": {
+   "path": "/instance/v1/zones/{zone}/snapshots/{snapshot_id}",
+   "method": "DELETE"
+  },
+  "instance/v1.DeleteVolume": {
+   "path": "/instance/v1/zones/{zone}/volumes/{volume_id}",
+   "method": "DELETE"
+  },
+  "instance/v1.DetachServerFileSystem": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/detach-filesystem",
+   "method": "POST",
+   "request": "instance/v1.DetachServerFileSystem.Request",
+   "response": "instance/v1.scaleway.instance.v1.DetachServerFileSystemResponse"
+  },
+  "instance/v1.DetachServerVolume": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/detach-volume",
+   "method": "POST",
+   "request": "instance/v1.DetachServerVolume.Request",
+   "response": "instance/v1.scaleway.instance.v1.DetachServerVolumeResponse"
+  },
+  "instance/v1.ExportSnapshot": {
+   "path": "/instance/v1/zones/{zone}/snapshots/{snapshot_id}/export",
+   "method": "POST",
+   "request": "instance/v1.ExportSnapshot.Request",
+   "response": "instance/v1.scaleway.instance.v1.ExportSnapshotResponse"
+  },
+  "instance/v1.GetDashboard": {
+   "path": "/instance/v1/zones/{zone}/dashboard",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetDashboardResponse"
+  },
+  "instance/v1.GetImage": {
+   "path": "/instance/v1/zones/{zone}/images/{image_id}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetImageResponse"
+  },
+  "instance/v1.GetIp": {
+   "path": "/instance/v1/zones/{zone}/ips/{ip}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetIpResponse"
+  },
+  "instance/v1.GetPlacementGroup": {
+   "path": "/instance/v1/zones/{zone}/placement_groups/{placement_group_id}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetPlacementGroupResponse"
+  },
+  "instance/v1.GetPlacementGroupServers": {
+   "path": "/instance/v1/zones/{zone}/placement_groups/{placement_group_id}/servers",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetPlacementGroupServersResponse"
+  },
+  "instance/v1.GetPrivateNIC": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/private_nics/{private_nic_id}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetPrivateNICResponse"
+  },
+  "instance/v1.GetSecurityGroup": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetSecurityGroupResponse"
+  },
+  "instance/v1.GetSecurityGroupRule": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}/rules/{security_group_rule_id}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetSecurityGroupRuleResponse"
+  },
+  "instance/v1.GetServer": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetServerResponse"
+  },
+  "instance/v1.GetServerCompatibleTypes": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/compatible-types",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ServerCompatibleTypes"
+  },
+  "instance/v1.GetServerTypesAvailability": {
+   "path": "/instance/v1/zones/{zone}/products/servers/availability",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetServerTypesAvailabilityResponse"
+  },
+  "instance/v1.GetServerUserData": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/user_data/{key}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.std.File"
+  },
+  "instance/v1.GetSnapshot": {
+   "path": "/instance/v1/zones/{zone}/snapshots/{snapshot_id}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetSnapshotResponse"
+  },
+  "instance/v1.GetVolume": {
+   "path": "/instance/v1/zones/{zone}/volumes/{volume_id}",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.GetVolumeResponse"
+  },
+  "instance/v1.ListDefaultSecurityGroupRules": {
+   "path": "/instance/v1/zones/{zone}/security_groups/default/rules",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListSecurityGroupRulesResponse"
+  },
+  "instance/v1.ListImages": {
+   "path": "/instance/v1/zones/{zone}/images",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListImagesResponse"
+  },
+  "instance/v1.ListIps": {
+   "path": "/instance/v1/zones/{zone}/ips",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListIpsResponse"
+  },
+  "instance/v1.ListPlacementGroups": {
+   "path": "/instance/v1/zones/{zone}/placement_groups",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListPlacementGroupsResponse"
+  },
+  "instance/v1.ListPrivateNICs": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/private_nics",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListPrivateNICsResponse"
+  },
+  "instance/v1.ListSecurityGroupRules": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}/rules",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListSecurityGroupRulesResponse"
+  },
+  "instance/v1.ListSecurityGroups": {
+   "path": "/instance/v1/zones/{zone}/security_groups",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListSecurityGroupsResponse"
+  },
+  "instance/v1.ListServerActions": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/action",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListServerActionsResponse"
+  },
+  "instance/v1.ListServerUserData": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/user_data",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListServerUserDataResponse"
+  },
+  "instance/v1.ListServers": {
+   "path": "/instance/v1/zones/{zone}/servers",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListServersResponse"
+  },
+  "instance/v1.ListServersTypes": {
+   "path": "/instance/v1/zones/{zone}/products/servers",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListServersTypesResponse"
+  },
+  "instance/v1.ListSnapshots": {
+   "path": "/instance/v1/zones/{zone}/snapshots",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListSnapshotsResponse"
+  },
+  "instance/v1.ListVolumes": {
+   "path": "/instance/v1/zones/{zone}/volumes",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListVolumesResponse"
+  },
+  "instance/v1.ListVolumesTypes": {
+   "path": "/instance/v1/zones/{zone}/products/volumes",
+   "method": "GET",
+   "response": "instance/v1.scaleway.instance.v1.ListVolumesTypesResponse"
+  },
+  "instance/v1.ReleaseIpToIpam": {
+   "path": "/instance/v1/zones/{zone}/ips/{ip_id}/release-to-ipam",
+   "method": "POST"
+  },
+  "instance/v1.ServerAction": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/action",
+   "method": "POST",
+   "request": "instance/v1.ServerAction.Request",
+   "response": "instance/v1.scaleway.instance.v1.ServerActionResponse"
+  },
+  "instance/v1.SetImage": {
+   "path": "/instance/v1/zones/{zone}/images/{id}",
+   "method": "PUT",
+   "request": "instance/v1.SetImage.Request",
+   "response": "instance/v1.scaleway.instance.v1.SetImageResponse"
+  },
+  "instance/v1.SetPlacementGroup": {
+   "path": "/instance/v1/zones/{zone}/placement_groups/{placement_group_id}",
+   "method": "PUT",
+   "request": "instance/v1.SetPlacementGroup.Request",
+   "response": "instance/v1.scaleway.instance.v1.SetPlacementGroupResponse"
+  },
+  "instance/v1.SetPlacementGroupServers": {
+   "path": "/instance/v1/zones/{zone}/placement_groups/{placement_group_id}/servers",
+   "method": "PUT",
+   "request": "instance/v1.SetPlacementGroupServers.Request",
+   "response": "instance/v1.scaleway.instance.v1.SetPlacementGroupServersResponse"
+  },
+  "instance/v1.SetSecurityGroup": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{id}",
+   "method": "PUT",
+   "request": "instance/v1.SetSecurityGroup.Request",
+   "response": "instance/v1.scaleway.instance.v1.SetSecurityGroupResponse"
+  },
+  "instance/v1.SetSecurityGroupRule": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}/rules/{security_group_rule_id}",
+   "method": "PUT",
+   "request": "instance/v1.SetSecurityGroupRule.Request",
+   "response": "instance/v1.scaleway.instance.v1.SetSecurityGroupRuleResponse"
+  },
+  "instance/v1.SetSecurityGroupRules": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}/rules",
+   "method": "PUT",
+   "request": "instance/v1.SetSecurityGroupRules.Request",
+   "response": "instance/v1.scaleway.instance.v1.SetSecurityGroupRulesResponse"
+  },
+  "instance/v1.SetServerUserData": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/user_data/{key}",
+   "method": "PATCH"
+  },
+  "instance/v1.SetSnapshot": {
+   "path": "/instance/v1/zones/{zone}/snapshots/{snapshot_id}",
+   "method": "PUT",
+   "request": "instance/v1.SetSnapshot.Request",
+   "response": "instance/v1.scaleway.instance.v1.SetSnapshotResponse"
+  },
+  "instance/v1.SetVolume": {
+   "path": "/instance/v1/zones/{zone}/volumes/{id}",
+   "method": "PUT",
+   "request": "instance/v1.SetVolume.Request",
+   "response": "instance/v1.scaleway.instance.v1.SetVolumeResponse"
+  },
+  "instance/v1.UpdateImage": {
+   "path": "/instance/v1/zones/{zone}/images/{image_id}",
+   "method": "PATCH",
+   "request": "instance/v1.UpdateImage.Request",
+   "response": "instance/v1.scaleway.instance.v1.UpdateImageResponse"
+  },
+  "instance/v1.UpdateIp": {
+   "path": "/instance/v1/zones/{zone}/ips/{ip}",
+   "method": "PATCH",
+   "request": "instance/v1.UpdateIp.Request",
+   "response": "instance/v1.scaleway.instance.v1.UpdateIpResponse"
+  },
+  "instance/v1.UpdatePlacementGroup": {
+   "path": "/instance/v1/zones/{zone}/placement_groups/{placement_group_id}",
+   "method": "PATCH",
+   "request": "instance/v1.UpdatePlacementGroup.Request",
+   "response": "instance/v1.scaleway.instance.v1.UpdatePlacementGroupResponse"
+  },
+  "instance/v1.UpdatePlacementGroupServers": {
+   "path": "/instance/v1/zones/{zone}/placement_groups/{placement_group_id}/servers",
+   "method": "PATCH",
+   "request": "instance/v1.UpdatePlacementGroupServers.Request",
+   "response": "instance/v1.scaleway.instance.v1.UpdatePlacementGroupServersResponse"
+  },
+  "instance/v1.UpdatePrivateNIC": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}/private_nics/{private_nic_id}",
+   "method": "PATCH",
+   "request": "instance/v1.UpdatePrivateNIC.Request",
+   "response": "instance/v1.scaleway.instance.v1.PrivateNIC"
+  },
+  "instance/v1.UpdateSecurityGroup": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}",
+   "method": "PATCH",
+   "request": "instance/v1.UpdateSecurityGroup.Request",
+   "response": "instance/v1.scaleway.instance.v1.UpdateSecurityGroupResponse"
+  },
+  "instance/v1.UpdateSecurityGroupRule": {
+   "path": "/instance/v1/zones/{zone}/security_groups/{security_group_id}/rules/{security_group_rule_id}",
+   "method": "PATCH",
+   "request": "instance/v1.UpdateSecurityGroupRule.Request",
+   "response": "instance/v1.scaleway.instance.v1.UpdateSecurityGroupRuleResponse"
+  },
+  "instance/v1.UpdateServer": {
+   "path": "/instance/v1/zones/{zone}/servers/{server_id}",
+   "method": "PATCH",
+   "request": "instance/v1.UpdateServer.Request",
+   "response": "instance/v1.scaleway.instance.v1.UpdateServerResponse"
+  },
+  "instance/v1.UpdateSnapshot": {
+   "path": "/instance/v1/zones/{zone}/snapshots/{snapshot_id}",
+   "method": "PATCH",
+   "request": "instance/v1.UpdateSnapshot.Request",
+   "response": "instance/v1.scaleway.instance.v1.UpdateSnapshotResponse"
+  },
+  "instance/v1.UpdateVolume": {
+   "path": "/instance/v1/zones/{zone}/volumes/{volume_id}",
+   "method": "PATCH",
+   "request": "instance/v1.UpdateVolume.Request",
+   "response": "instance/v1.scaleway.instance.v1.UpdateVolumeResponse"
+  },
+  "ipam/v1.AttachIP": {
+   "path": "/ipam/v1/regions/{region}/ips/{ip_id}/attach",
+   "method": "POST",
+   "request": "ipam/v1.AttachIP.Request",
+   "response": "ipam/v1.scaleway.ipam.v1.IP"
+  },
+  "ipam/v1.BookIP": {
+   "path": "/ipam/v1/regions/{region}/ips",
+   "method": "POST",
+   "request": "ipam/v1.BookIP.Request",
+   "response": "ipam/v1.scaleway.ipam.v1.IP"
+  },
+  "ipam/v1.DetachIP": {
+   "path": "/ipam/v1/regions/{region}/ips/{ip_id}/detach",
+   "method": "POST",
+   "request": "ipam/v1.DetachIP.Request",
+   "response": "ipam/v1.scaleway.ipam.v1.IP"
+  },
+  "ipam/v1.GetIP": {
+   "path": "/ipam/v1/regions/{region}/ips/{ip_id}",
+   "method": "GET",
+   "response": "ipam/v1.scaleway.ipam.v1.IP"
+  },
+  "ipam/v1.ListIPs": {
+   "path": "/ipam/v1/regions/{region}/ips",
+   "method": "GET",
+   "response": "ipam/v1.scaleway.ipam.v1.ListIPsResponse"
+  },
+  "ipam/v1.MoveIP": {
+   "path": "/ipam/v1/regions/{region}/ips/{ip_id}/move",
+   "method": "POST",
+   "request": "ipam/v1.MoveIP.Request",
+   "response": "ipam/v1.scaleway.ipam.v1.IP"
+  },
+  "ipam/v1.ReleaseIP": {
+   "path": "/ipam/v1/regions/{region}/ips/{ip_id}",
+   "method": "DELETE"
+  },
+  "ipam/v1.ReleaseIPSet": {
+   "path": "/ipam/v1/regions/{region}/ip-sets/release",
+   "method": "POST",
+   "request": "ipam/v1.ReleaseIPSet.Request"
+  },
+  "ipam/v1.UpdateIP": {
+   "path": "/ipam/v1/regions/{region}/ips/{ip_id}",
+   "method": "PATCH",
+   "request": "ipam/v1.UpdateIP.Request",
+   "response": "ipam/v1.scaleway.ipam.v1.IP"
+  },
+  "marketplace/v2.GetCategory": {
+   "path": "/marketplace/v2/categories/{category_id}",
+   "method": "GET",
+   "response": "marketplace/v2.scaleway.marketplace.v2.Category"
+  },
+  "marketplace/v2.GetImage": {
+   "path": "/marketplace/v2/images/{image_id}",
+   "method": "GET",
+   "response": "marketplace/v2.scaleway.marketplace.v2.Image"
+  },
+  "marketplace/v2.GetLocalImage": {
+   "path": "/marketplace/v2/local-images/{local_image_id}",
+   "method": "GET",
+   "response": "marketplace/v2.scaleway.marketplace.v2.LocalImage"
+  },
+  "marketplace/v2.GetVersion": {
+   "path": "/marketplace/v2/versions/{version_id}",
+   "method": "GET",
+   "response": "marketplace/v2.scaleway.marketplace.v2.Version"
+  },
+  "marketplace/v2.ListCategories": {
+   "path": "/marketplace/v2/categories",
+   "method": "GET",
+   "response": "marketplace/v2.scaleway.marketplace.v2.ListCategoriesResponse"
+  },
+  "marketplace/v2.ListImages": {
+   "path": "/marketplace/v2/images",
+   "method": "GET",
+   "response": "marketplace/v2.scaleway.marketplace.v2.ListImagesResponse"
+  },
+  "marketplace/v2.ListLocalImages": {
+   "path": "/marketplace/v2/local-images",
+   "method": "GET",
+   "response": "marketplace/v2.scaleway.marketplace.v2.ListLocalImagesResponse"
+  },
+  "marketplace/v2.ListVersions": {
+   "path": "/marketplace/v2/versions",
+   "method": "GET",
+   "response": "marketplace/v2.scaleway.marketplace.v2.ListVersionsResponse"
+  },
+  "vpc/v2.AddPrivateNetworkS3Endpoint": {
+   "path": "/vpc/v2/regions/{region}/s3-integration/{vpc_id}/private-networks",
+   "method": "POST",
+   "request": "vpc/v2.AddPrivateNetworkS3Endpoint.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.AddPrivateNetworkS3EndpointResponse"
+  },
+  "vpc/v2.CreateIngressRule": {
+   "path": "/vpc/v2/regions/{region}/ingress-rules",
+   "method": "POST",
+   "request": "vpc/v2.CreateIngressRule.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.IngressRule"
+  },
+  "vpc/v2.CreatePrivateNetwork": {
+   "path": "/vpc/v2/regions/{region}/private-networks",
+   "method": "POST",
+   "request": "vpc/v2.CreatePrivateNetwork.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.PrivateNetwork"
+  },
+  "vpc/v2.CreateRoute": {
+   "path": "/vpc/v2/regions/{region}/routes",
+   "method": "POST",
+   "request": "vpc/v2.CreateRoute.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.Route"
+  },
+  "vpc/v2.CreateVPC": {
+   "path": "/vpc/v2/regions/{region}/vpcs",
+   "method": "POST",
+   "request": "vpc/v2.CreateVPC.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.VPC"
+  },
+  "vpc/v2.CreateVPCConnector": {
+   "path": "/vpc/v2/regions/{region}/vpc-connectors",
+   "method": "POST",
+   "request": "vpc/v2.CreateVPCConnector.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.VPCConnector"
+  },
+  "vpc/v2.DeleteIngressRule": {
+   "path": "/vpc/v2/regions/{region}/ingress-rules/{rule_id}",
+   "method": "DELETE"
+  },
+  "vpc/v2.DeletePrivateNetwork": {
+   "path": "/vpc/v2/regions/{region}/private-networks/{private_network_id}",
+   "method": "DELETE"
+  },
+  "vpc/v2.DeletePrivateNetworkS3Endpoint": {
+   "path": "/vpc/v2/regions/{region}/s3-integration/{vpc_id}/private-networks/{private_network_id}",
+   "method": "DELETE"
+  },
+  "vpc/v2.DeleteRoute": {
+   "path": "/vpc/v2/regions/{region}/routes/{route_id}",
+   "method": "DELETE"
+  },
+  "vpc/v2.DeleteVPC": {
+   "path": "/vpc/v2/regions/{region}/vpcs/{vpc_id}",
+   "method": "DELETE"
+  },
+  "vpc/v2.DeleteVPCConnector": {
+   "path": "/vpc/v2/regions/{region}/vpc-connectors/{vpc_connector_id}",
+   "method": "DELETE"
+  },
+  "vpc/v2.DisableS3Endpoint": {
+   "path": "/vpc/v2/regions/{region}/s3-integration/{vpc_id}/disable",
+   "method": "POST",
+   "response": "vpc/v2.scaleway.vpc.v2.VPC"
+  },
+  "vpc/v2.EnableDHCP": {
+   "path": "/vpc/v2/regions/{region}/private-networks/{private_network_id}/enable-dhcp",
+   "method": "POST",
+   "response": "vpc/v2.scaleway.vpc.v2.PrivateNetwork"
+  },
+  "vpc/v2.EnableRouting": {
+   "path": "/vpc/v2/regions/{region}/vpcs/{vpc_id}/enable-routing",
+   "method": "POST",
+   "response": "vpc/v2.scaleway.vpc.v2.VPC"
+  },
+  "vpc/v2.EnableS3Endpoint": {
+   "path": "/vpc/v2/regions/{region}/s3-integration/{vpc_id}/enable",
+   "method": "POST",
+   "response": "vpc/v2.scaleway.vpc.v2.VPC"
+  },
+  "vpc/v2.GetAcl": {
+   "path": "/vpc/v2/regions/{region}/vpcs/{vpc_id}/acl-rules",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.GetAclResponse"
+  },
+  "vpc/v2.GetIngressRule": {
+   "path": "/vpc/v2/regions/{region}/ingress-rules/{rule_id}",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.IngressRule"
+  },
+  "vpc/v2.GetPrivateNetwork": {
+   "path": "/vpc/v2/regions/{region}/private-networks/{private_network_id}",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.PrivateNetwork"
+  },
+  "vpc/v2.GetRoute": {
+   "path": "/vpc/v2/regions/{region}/routes/{route_id}",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.Route"
+  },
+  "vpc/v2.GetVPC": {
+   "path": "/vpc/v2/regions/{region}/vpcs/{vpc_id}",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.VPC"
+  },
+  "vpc/v2.GetVPCConnector": {
+   "path": "/vpc/v2/regions/{region}/vpc-connectors/{vpc_connector_id}",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.VPCConnector"
+  },
+  "vpc/v2.ListIngressRules": {
+   "path": "/vpc/v2/regions/{region}/ingress-rules",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.ListIngressRulesResponse"
+  },
+  "vpc/v2.ListPrivateNetworks": {
+   "path": "/vpc/v2/regions/{region}/private-networks",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.ListPrivateNetworksResponse"
+  },
+  "vpc/v2.ListSubnetOverlaps": {
+   "path": "/vpc/v2/regions/{region}/vpc-connectors/{vpc_connector_id}/subnet-overlaps",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.ListSubnetOverlapsResponse"
+  },
+  "vpc/v2.ListSubnets": {
+   "path": "/vpc/v2/regions/{region}/subnets",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.ListSubnetsResponse"
+  },
+  "vpc/v2.ListVPCConnectors": {
+   "path": "/vpc/v2/regions/{region}/vpc-connectors",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.ListVPCConnectorsResponse"
+  },
+  "vpc/v2.ListVPCs": {
+   "path": "/vpc/v2/regions/{region}/vpcs",
+   "method": "GET",
+   "response": "vpc/v2.scaleway.vpc.v2.ListVPCsResponse"
+  },
+  "vpc/v2.SetAcl": {
+   "path": "/vpc/v2/regions/{region}/vpcs/{vpc_id}/acl-rules",
+   "method": "PUT",
+   "request": "vpc/v2.SetAcl.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.SetAclResponse"
+  },
+  "vpc/v2.SetPrivateNetworksS3Endpoint": {
+   "path": "/vpc/v2/regions/{region}/s3-integration/{vpc_id}/private-networks",
+   "method": "PUT",
+   "request": "vpc/v2.SetPrivateNetworksS3Endpoint.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.SetPrivateNetworksS3EndpointResponse"
+  },
+  "vpc/v2.UpdateIngressRule": {
+   "path": "/vpc/v2/regions/{region}/ingress-rules/{rule_id}",
+   "method": "PATCH",
+   "request": "vpc/v2.UpdateIngressRule.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.IngressRule"
+  },
+  "vpc/v2.UpdatePrivateNetwork": {
+   "path": "/vpc/v2/regions/{region}/private-networks/{private_network_id}",
+   "method": "PATCH",
+   "request": "vpc/v2.UpdatePrivateNetwork.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.PrivateNetwork"
+  },
+  "vpc/v2.UpdateRoute": {
+   "path": "/vpc/v2/regions/{region}/routes/{route_id}",
+   "method": "PATCH",
+   "request": "vpc/v2.UpdateRoute.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.Route"
+  },
+  "vpc/v2.UpdateVPC": {
+   "path": "/vpc/v2/regions/{region}/vpcs/{vpc_id}",
+   "method": "PATCH",
+   "request": "vpc/v2.UpdateVPC.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.VPC"
+  },
+  "vpc/v2.UpdateVPCConnector": {
+   "path": "/vpc/v2/regions/{region}/vpc-connectors/{vpc_connector_id}",
+   "method": "PATCH",
+   "request": "vpc/v2.UpdateVPCConnector.Request",
+   "response": "vpc/v2.scaleway.vpc.v2.VPCConnector"
+  }
+ },
+ "schemas": {
+  "iam/v1alpha1.AddGroupMember.Request": {
+   "closed": false,
+   "properties": {
+    "application_id": {
+     "type": "string"
+    },
+    "user_id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.AddGroupMembers.Request": {
+   "closed": false,
+   "properties": {
+    "application_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "user_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.AddSamlCertificate.Request": {
+   "closed": false,
+   "required": [
+    "content",
+    "type"
+   ],
+   "properties": {
+    "content": {
+     "type": "string"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "unknown_certificate_type",
+      "signing",
+      "encryption"
+     ]
+    }
+   }
+  },
+  "iam/v1alpha1.CheckPermissions.Request": {
+   "closed": false,
+   "properties": {
+    "permissions": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.CheckPermissionsRequest.Permission"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.CreateAPIKey.Request": {
+   "closed": false,
+   "properties": {
+    "application_id": {
+     "type": "string"
+    },
+    "default_project_id": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "expires_at": {
+     "type": "string"
+    },
+    "user_id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.CreateApplication.Request": {
+   "closed": false,
+   "required": [
+    "name"
+   ],
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.CreateGroup.Request": {
+   "closed": false,
+   "required": [
+    "name",
+    "organization_id"
+   ],
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.CreatePolicy.Request": {
+   "closed": false,
+   "required": [
+    "name"
+   ],
+   "properties": {
+    "application_id": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "group_id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "no_principal": {
+     "type": "boolean"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.RuleSpecs"
+     }
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "user_id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.CreateSSHKey.Request": {
+   "closed": false,
+   "required": [
+    "name",
+    "project_id",
+    "public_key"
+   ],
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "public_key": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.CreateUser.Request": {
+   "closed": false,
+   "required": [
+    "organization_id"
+   ],
+   "properties": {
+    "email": {
+     "type": "string"
+    },
+    "member": {
+     "type": "object"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.JoinUserConnection.Request": {
+   "closed": false,
+   "properties": {
+    "token": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.RemoveGroupMember.Request": {
+   "closed": false,
+   "properties": {
+    "application_id": {
+     "type": "string"
+    },
+    "user_id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.RemoveUserConnection.Request": {
+   "closed": false,
+   "properties": {
+    "target_user_id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.SetGroupMembers.Request": {
+   "closed": false,
+   "required": [
+    "application_ids",
+    "user_ids"
+   ],
+   "properties": {
+    "application_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "user_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.SetOrganizationAlias.Request": {
+   "closed": false,
+   "properties": {
+    "alias": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.SetRules.Request": {
+   "closed": false,
+   "required": [
+    "policy_id",
+    "rules"
+   ],
+   "properties": {
+    "policy_id": {
+     "type": "string"
+    },
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.RuleSpecs"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateAPIKey.Request": {
+   "closed": false,
+   "properties": {
+    "default_project_id": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "expires_at": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateApplication.Request": {
+   "closed": false,
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateGroup.Request": {
+   "closed": false,
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateOrganizationLoginMethods.Request": {
+   "closed": false,
+   "properties": {
+    "login_magic_code_enabled": {
+     "type": "boolean"
+    },
+    "login_oauth2_enabled": {
+     "type": "boolean"
+    },
+    "login_password_enabled": {
+     "type": "boolean"
+    },
+    "login_saml_enabled": {
+     "type": "boolean"
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateOrganizationSecuritySettings.Request": {
+   "closed": false,
+   "properties": {
+    "enforce_password_renewal": {
+     "type": "boolean"
+    },
+    "grace_period_duration": {
+     "type": "string"
+    },
+    "login_attempts_before_locked": {
+     "type": "integer"
+    },
+    "max_api_key_expiration_duration": {
+     "type": "string"
+    },
+    "max_login_session_duration": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.UpdatePolicy.Request": {
+   "closed": false,
+   "properties": {
+    "application_id": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "group_id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "no_principal": {
+     "type": "boolean"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "user_id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateSSHKey.Request": {
+   "closed": false,
+   "properties": {
+    "disabled": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateSaml.Request": {
+   "closed": false,
+   "properties": {
+    "entity_id": {
+     "type": "string"
+    },
+    "single_sign_on_url": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateUser.Request": {
+   "closed": false,
+   "properties": {
+    "email": {
+     "type": "string"
+    },
+    "first_name": {
+     "type": "string"
+    },
+    "last_name": {
+     "type": "string"
+    },
+    "locale": {
+     "type": "string"
+    },
+    "phone_number": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateUserPassword.Request": {
+   "closed": false,
+   "required": [
+    "password"
+   ],
+   "properties": {
+    "password": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.UpdateUserUsername.Request": {
+   "closed": false,
+   "required": [
+    "username"
+   ],
+   "properties": {
+    "username": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.ValidateUserMFAOTP.Request": {
+   "closed": false,
+   "properties": {
+    "one_time_password": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.APIKey": {
+   "closed": false,
+   "properties": {
+    "access_key": {
+     "type": "string"
+    },
+    "application_id": {
+     "type": "string"
+    },
+    "created_at": {
+     "type": "string"
+    },
+    "creation_ip": {
+     "type": "string"
+    },
+    "default_project_id": {
+     "type": "string"
+    },
+    "deletable": {
+     "type": "boolean"
+    },
+    "description": {
+     "type": "string"
+    },
+    "editable": {
+     "type": "boolean"
+    },
+    "expires_at": {
+     "type": "string"
+    },
+    "managed": {
+     "type": "boolean"
+    },
+    "secret_key": {
+     "type": "string"
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "user_id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Application": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "deletable": {
+     "type": "boolean"
+    },
+    "description": {
+     "type": "string"
+    },
+    "editable": {
+     "type": "boolean"
+    },
+    "id": {
+     "type": "string"
+    },
+    "managed": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "nb_api_keys": {
+     "type": "integer"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "updated_at": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.CheckPermissionsRequest.Permission": {
+   "closed": false,
+   "properties": {
+    "action": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "service": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.CheckPermissionsResponse": {
+   "closed": false,
+   "properties": {
+    "responses": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.CheckPermissionsResponse.Response"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.CheckPermissionsResponse.Response": {
+   "closed": false,
+   "properties": {
+    "decision": {
+     "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.CheckPermissionsResponse.Response.Decision"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.CheckPermissionsResponse.Response.Decision": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "deny",
+    "allow"
+   ]
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Connection": {
+   "closed": false,
+   "properties": {
+    "organization": {
+     "type": "object"
+    },
+    "user": {
+     "type": "object"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.CreateScimTokenResponse": {
+   "closed": false,
+   "properties": {
+    "bearer_token": {
+     "type": "string"
+    },
+    "token": {
+     "type": "object"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.GetUserConnectionsResponse": {
+   "closed": false,
+   "properties": {
+    "connections": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.Connection"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.GracePeriod": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "expires_at": {
+     "type": "string"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "unknown_grace_period_type",
+      "update_password",
+      "set_mfa"
+     ]
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Group": {
+   "closed": false,
+   "properties": {
+    "application_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "created_at": {
+     "type": "string"
+    },
+    "deletable": {
+     "type": "boolean"
+    },
+    "description": {
+     "type": "string"
+    },
+    "editable": {
+     "type": "boolean"
+    },
+    "id": {
+     "type": "string"
+    },
+    "managed": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "user_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.InitiateUserConnectionResponse": {
+   "closed": false,
+   "properties": {
+    "token": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.JWT": {
+   "closed": false,
+   "properties": {
+    "audience_id": {
+     "type": "string"
+    },
+    "created_at": {
+     "type": "string"
+    },
+    "expires_at": {
+     "type": "string"
+    },
+    "ip": {
+     "type": "string"
+    },
+    "issuer_id": {
+     "type": "string"
+    },
+    "jti": {
+     "type": "string"
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "user_agent": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListAPIKeysResponse": {
+   "closed": false,
+   "properties": {
+    "api_keys": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.APIKey"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListApplicationsResponse": {
+   "closed": false,
+   "properties": {
+    "applications": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.Application"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListGracePeriodsResponse": {
+   "closed": false,
+   "properties": {
+    "grace_periods": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.GracePeriod"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListGroupsResponse": {
+   "closed": false,
+   "properties": {
+    "groups": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.Group"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListJWTsResponse": {
+   "closed": false,
+   "properties": {
+    "jwts": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.JWT"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListLogsResponse": {
+   "closed": false,
+   "properties": {
+    "logs": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.Log"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListPermissionSetsResponse": {
+   "closed": false,
+   "properties": {
+    "permission_sets": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.PermissionSet"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListPoliciesResponse": {
+   "closed": false,
+   "properties": {
+    "policies": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.Policy"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListQuotaResponse": {
+   "closed": false,
+   "properties": {
+    "quota": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.Quotum"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListRulesResponse": {
+   "closed": false,
+   "properties": {
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.Rule"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListSSHKeysResponse": {
+   "closed": false,
+   "properties": {
+    "ssh_keys": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.SSHKey"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListSamlCertificatesResponse": {
+   "closed": false,
+   "properties": {
+    "certificates": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.SamlCertificate"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListScimTokensResponse": {
+   "closed": false,
+   "properties": {
+    "scim_tokens": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.ScimToken"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ListUsersResponse": {
+   "closed": false,
+   "properties": {
+    "total_count": {
+     "type": "integer"
+    },
+    "users": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.User"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Log": {
+   "closed": false,
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "unknown_action",
+      "created",
+      "updated",
+      "deleted"
+     ]
+    },
+    "bearer_id": {
+     "type": "string"
+    },
+    "created_at": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "ip": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "resource_id": {
+     "type": "string"
+    },
+    "resource_type": {
+     "type": "string",
+     "enum": [
+      "unknown_resource_type",
+      "api_key",
+      "user",
+      "application",
+      "group",
+      "policy"
+     ]
+    },
+    "user_agent": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.MFAOTP": {
+   "closed": false,
+   "properties": {
+    "secret": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Organization": {
+   "closed": false,
+   "properties": {
+    "alias": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "login_magic_code_enabled": {
+     "type": "boolean"
+    },
+    "login_oauth2_enabled": {
+     "type": "boolean"
+    },
+    "login_password_enabled": {
+     "type": "boolean"
+    },
+    "login_saml_enabled": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.OrganizationSecuritySettings": {
+   "closed": false,
+   "properties": {
+    "enforce_password_renewal": {
+     "type": "boolean"
+    },
+    "grace_period_duration": {
+     "type": "string"
+    },
+    "login_attempts_before_locked": {
+     "type": "integer"
+    },
+    "max_api_key_expiration_duration": {
+     "type": "string"
+    },
+    "max_login_session_duration": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.PermissionSet": {
+   "closed": false,
+   "properties": {
+    "categories": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "description": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "scope_type": {
+     "type": "string",
+     "enum": [
+      "unknown_scope_type",
+      "projects",
+      "organization",
+      "account_root_user"
+     ]
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Policy": {
+   "closed": false,
+   "properties": {
+    "application_id": {
+     "type": "string"
+    },
+    "created_at": {
+     "type": "string"
+    },
+    "deletable": {
+     "type": "boolean"
+    },
+    "description": {
+     "type": "string"
+    },
+    "editable": {
+     "type": "boolean"
+    },
+    "group_id": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "managed": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "nb_permission_sets": {
+     "type": "integer"
+    },
+    "nb_rules": {
+     "type": "integer"
+    },
+    "nb_scopes": {
+     "type": "integer"
+    },
+    "no_principal": {
+     "type": "boolean"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "user_id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Quotum": {
+   "closed": false,
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "limit": {
+     "type": "integer"
+    },
+    "limits": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.Quotum.Limit"
+     }
+    },
+    "locality_type": {
+     "type": "string",
+     "enum": [
+      "global",
+      "region",
+      "zone"
+     ]
+    },
+    "name": {
+     "type": "string"
+    },
+    "pretty_name": {
+     "type": "string"
+    },
+    "unit": {
+     "type": "string"
+    },
+    "unlimited": {
+     "type": "boolean"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Quotum.Limit": {
+   "closed": false,
+   "properties": {
+    "global": {
+     "type": "boolean"
+    },
+    "limit": {
+     "type": "integer"
+    },
+    "region": {
+     "type": "string"
+    },
+    "unlimited": {
+     "type": "boolean"
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Rule": {
+   "closed": false,
+   "properties": {
+    "account_root_user_id": {
+     "type": "string"
+    },
+    "condition": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "permission_set_names": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "permission_sets_scope_type": {
+     "type": "string",
+     "enum": [
+      "unknown_scope_type",
+      "projects",
+      "organization",
+      "account_root_user"
+     ]
+    },
+    "project_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.RuleSpecs": {
+   "closed": false,
+   "properties": {
+    "condition": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "permission_set_names": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "project_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.SSHKey": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "disabled": {
+     "type": "boolean"
+    },
+    "fingerprint": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "public_key": {
+     "type": "string"
+    },
+    "updated_at": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Saml": {
+   "closed": false,
+   "properties": {
+    "entity_id": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "service_provider": {
+     "type": "object"
+    },
+    "single_sign_on_url": {
+     "type": "string"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "unknown_saml_status",
+      "valid",
+      "missing_certificate",
+      "missing_entity_id",
+      "missing_single_sign_on_url"
+     ]
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.SamlCertificate": {
+   "closed": false,
+   "properties": {
+    "content": {
+     "type": "string"
+    },
+    "expires_at": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "origin": {
+     "type": "string",
+     "enum": [
+      "unknown_certificate_origin",
+      "scaleway",
+      "identity_provider"
+     ]
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "unknown_certificate_type",
+      "signing",
+      "encryption"
+     ]
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.Scim": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ScimToken": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "expires_at": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "scim_id": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.SetRulesResponse": {
+   "closed": false,
+   "properties": {
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "iam/v1alpha1.scaleway.iam.v1alpha1.Rule"
+     }
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.User": {
+   "closed": false,
+   "properties": {
+    "account_root_user_id": {
+     "type": "string"
+    },
+    "created_at": {
+     "type": "string"
+    },
+    "deletable": {
+     "type": "boolean"
+    },
+    "email": {
+     "type": "string"
+    },
+    "first_name": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "last_login_at": {
+     "type": "string"
+    },
+    "last_name": {
+     "type": "string"
+    },
+    "locale": {
+     "type": "string"
+    },
+    "locked": {
+     "type": "boolean"
+    },
+    "mfa": {
+     "type": "boolean"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "phone_number": {
+     "type": "string"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "unknown_status",
+      "invitation_pending",
+      "activated"
+     ]
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "two_factor_enabled": {
+     "type": "boolean"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "unknown_type",
+      "owner",
+      "member"
+     ]
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "username": {
+     "type": "string"
+    }
+   }
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.User.Type": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_type",
+    "owner",
+    "member"
+   ]
+  },
+  "iam/v1alpha1.scaleway.iam.v1alpha1.ValidateUserMFAOTPResponse": {
+   "closed": false,
+   "properties": {
+    "recovery_codes": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.AttachServerFileSystem.Request": {
+   "closed": false,
+   "properties": {
+    "filesystem_id": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.AttachServerVolume.Request": {
+   "closed": false,
+   "properties": {
+    "boot": {
+     "type": "boolean"
+    },
+    "volume_id": {
+     "type": "string"
+    },
+    "volume_type": {
+     "ref": "instance/v1.scaleway.instance.v1.AttachServerVolumeRequest.VolumeType"
+    }
+   }
+  },
+  "instance/v1.CheckBlockMigrationOrganizationQuotas.Request": {
+   "closed": false,
+   "properties": {
+    "organization": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.CreateImage.Request": {
+   "closed": false,
+   "required": [
+    "arch",
+    "root_volume"
+   ],
+   "properties": {
+    "arch": {
+     "type": "string",
+     "enum": [
+      "unknown_arch",
+      "x86_64",
+      "arm",
+      "arm64"
+     ]
+    },
+    "extra_volumes": {
+     "type": "object"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "public": {
+     "type": "boolean"
+    },
+    "root_volume": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.CreateIp.Request": {
+   "closed": false,
+   "properties": {
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "server": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "unknown_iptype",
+      "routed_ipv4",
+      "routed_ipv6"
+     ]
+    }
+   }
+  },
+  "instance/v1.CreatePlacementGroup.Request": {
+   "closed": false,
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "policy_mode": {
+     "type": "string",
+     "enum": [
+      "optional",
+      "enforced"
+     ]
+    },
+    "policy_type": {
+     "type": "string",
+     "enum": [
+      "max_availability",
+      "low_latency"
+     ]
+    },
+    "project": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.CreatePrivateNIC.Request": {
+   "closed": false,
+   "required": [
+    "private_network_id"
+   ],
+   "properties": {
+    "ipam_ip_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "private_network_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.CreateSecurityGroup.Request": {
+   "closed": false,
+   "required": [
+    "name"
+   ],
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "enable_default_security": {
+     "type": "boolean"
+    },
+    "inbound_default_policy": {
+     "type": "string",
+     "enum": [
+      "unknown_policy",
+      "accept",
+      "drop"
+     ]
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "organization_default": {
+     "type": "boolean"
+    },
+    "outbound_default_policy": {
+     "type": "string",
+     "enum": [
+      "unknown_policy",
+      "accept",
+      "drop"
+     ]
+    },
+    "project": {
+     "type": "string"
+    },
+    "project_default": {
+     "type": "boolean"
+    },
+    "stateful": {
+     "type": "boolean"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.CreateSecurityGroupRule.Request": {
+   "closed": false,
+   "required": [
+    "action",
+    "direction",
+    "ip_range",
+    "protocol"
+   ],
+   "properties": {
+    "action": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule.Action"
+    },
+    "dest_port_from": {
+     "type": "integer"
+    },
+    "dest_port_to": {
+     "type": "integer"
+    },
+    "direction": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule.Direction"
+    },
+    "editable": {
+     "type": "boolean"
+    },
+    "ip_range": {
+     "type": "string"
+    },
+    "position": {
+     "type": "integer"
+    },
+    "protocol": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule.Protocol"
+    }
+   }
+  },
+  "instance/v1.CreateServer.Request": {
+   "closed": false,
+   "required": [
+    "commercial_type",
+    "name"
+   ],
+   "properties": {
+    "admin_password_encryption_ssh_key_id": {
+     "type": "string"
+    },
+    "boot_type": {
+     "type": "string",
+     "enum": [
+      "local",
+      "bootscript",
+      "rescue"
+     ]
+    },
+    "commercial_type": {
+     "type": "string"
+    },
+    "dynamic_ip_required": {
+     "type": "boolean"
+    },
+    "enable_ipv6": {
+     "type": "boolean"
+    },
+    "image": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "placement_group": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "protected": {
+     "type": "boolean"
+    },
+    "public_ip": {
+     "type": "string"
+    },
+    "public_ips": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "routed_ip_enabled": {
+     "type": "boolean"
+    },
+    "security_group": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "volumes": {
+     "type": "object"
+    }
+   }
+  },
+  "instance/v1.CreateSnapshot.Request": {
+   "closed": false,
+   "properties": {
+    "bucket": {
+     "type": "string"
+    },
+    "key": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "size": {
+     "type": "integer"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "volume_id": {
+     "type": "string"
+    },
+    "volume_type": {
+     "type": "string",
+     "enum": [
+      "unknown_volume_type",
+      "l_ssd",
+      "b_ssd",
+      "unified"
+     ]
+    }
+   }
+  },
+  "instance/v1.CreateVolume.Request": {
+   "closed": false,
+   "properties": {
+    "base_snapshot": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "size": {
+     "type": "integer"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "volume_type": {
+     "type": "string",
+     "enum": [
+      "l_ssd",
+      "b_ssd",
+      "unified",
+      "scratch",
+      "sbs_volume",
+      "sbs_snapshot"
+     ]
+    }
+   }
+  },
+  "instance/v1.DetachServerFileSystem.Request": {
+   "closed": false,
+   "properties": {
+    "filesystem_id": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.DetachServerVolume.Request": {
+   "closed": false,
+   "properties": {
+    "volume_id": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.ExportSnapshot.Request": {
+   "closed": false,
+   "properties": {
+    "bucket": {
+     "type": "string"
+    },
+    "key": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.ServerAction.Request": {
+   "closed": false,
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "poweron",
+      "backup",
+      "stop_in_place",
+      "poweroff",
+      "terminate",
+      "reboot",
+      "enable_routed_ip"
+     ]
+    },
+    "disable_ipv6": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "volumes": {
+     "type": "object"
+    }
+   }
+  },
+  "instance/v1.SetImage.Request": {
+   "closed": false,
+   "properties": {
+    "arch": {
+     "ref": "instance/v1.scaleway.instance.v1.Arch"
+    },
+    "creation_date": {
+     "type": "string"
+    },
+    "default_bootscript": {
+     "ref": "instance/v1.scaleway.instance.v1.Bootscript"
+    },
+    "extra_volumes": {
+     "type": "object"
+    },
+    "from_server": {
+     "type": "string"
+    },
+    "modification_date": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "public": {
+     "type": "boolean"
+    },
+    "root_volume": {
+     "ref": "instance/v1.scaleway.instance.v1.VolumeSummary"
+    },
+    "state": {
+     "ref": "instance/v1.scaleway.instance.v1.Image.State"
+    },
+    "tags": {
+     "ref": "instance/v1.scaleway.std.StringsValue"
+    }
+   }
+  },
+  "instance/v1.SetPlacementGroup.Request": {
+   "closed": false,
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "policy_mode": {
+     "ref": "instance/v1.scaleway.instance.v1.PlacementGroup.PolicyMode"
+    },
+    "policy_type": {
+     "ref": "instance/v1.scaleway.instance.v1.PlacementGroup.PolicyType"
+    },
+    "project": {
+     "type": "string"
+    },
+    "tags": {
+     "ref": "instance/v1.scaleway.std.StringsValue"
+    }
+   }
+  },
+  "instance/v1.SetPlacementGroupServers.Request": {
+   "closed": false,
+   "required": [
+    "servers"
+   ],
+   "properties": {
+    "servers": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.SetSecurityGroup.Request": {
+   "closed": false,
+   "properties": {
+    "creation_date": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "enable_default_security": {
+     "type": "boolean"
+    },
+    "inbound_default_policy": {
+     "type": "string",
+     "enum": [
+      "unknown_policy",
+      "accept",
+      "drop"
+     ]
+    },
+    "modification_date": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "organization_default": {
+     "type": "boolean"
+    },
+    "outbound_default_policy": {
+     "type": "string",
+     "enum": [
+      "unknown_policy",
+      "accept",
+      "drop"
+     ]
+    },
+    "project": {
+     "type": "string"
+    },
+    "project_default": {
+     "type": "boolean"
+    },
+    "servers": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.ServerSummary"
+     }
+    },
+    "stateful": {
+     "type": "boolean"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.SetSecurityGroupRule.Request": {
+   "closed": false,
+   "properties": {
+    "action": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule.Action"
+    },
+    "dest_port_from": {
+     "type": "integer"
+    },
+    "dest_port_to": {
+     "type": "integer"
+    },
+    "direction": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule.Direction"
+    },
+    "editable": {
+     "type": "boolean"
+    },
+    "id": {
+     "type": "string"
+    },
+    "ip_range": {
+     "type": "string"
+    },
+    "position": {
+     "type": "integer"
+    },
+    "protocol": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule.Protocol"
+    }
+   }
+  },
+  "instance/v1.SetSecurityGroupRules.Request": {
+   "closed": false,
+   "properties": {
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.SetSecurityGroupRulesRequest.Rule"
+     }
+    }
+   }
+  },
+  "instance/v1.SetSnapshot.Request": {
+   "closed": false,
+   "properties": {
+    "base_volume": {
+     "ref": "instance/v1.scaleway.instance.v1.Snapshot.BaseVolume"
+    },
+    "creation_date": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "modification_date": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "size": {
+     "type": "integer"
+    },
+    "state": {
+     "ref": "instance/v1.scaleway.instance.v1.Snapshot.State"
+    },
+    "tags": {
+     "ref": "instance/v1.scaleway.std.StringsValue"
+    },
+    "volume_type": {
+     "ref": "instance/v1.scaleway.instance.v1.Volume.VolumeType"
+    }
+   }
+  },
+  "instance/v1.SetVolume.Request": {
+   "closed": false,
+   "properties": {
+    "creation_date": {
+     "type": "string"
+    },
+    "export_uri": {
+     "type": "string"
+    },
+    "modification_date": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "server": {
+     "type": "object"
+    },
+    "size": {
+     "type": "integer"
+    },
+    "state": {
+     "type": "string",
+     "enum": [
+      "available",
+      "snapshotting",
+      "fetching",
+      "saving",
+      "attaching",
+      "resizing",
+      "hotsyncing",
+      "error"
+     ]
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "volume_type": {
+     "type": "string",
+     "enum": [
+      "l_ssd",
+      "b_ssd",
+      "unified",
+      "scratch",
+      "sbs_volume",
+      "sbs_snapshot"
+     ]
+    }
+   }
+  },
+  "instance/v1.UpdateImage.Request": {
+   "closed": false,
+   "properties": {
+    "arch": {
+     "type": "string",
+     "enum": [
+      "unknown_arch",
+      "x86_64",
+      "arm",
+      "arm64"
+     ]
+    },
+    "extra_volumes": {
+     "type": "object"
+    },
+    "name": {
+     "type": "string"
+    },
+    "public": {
+     "type": "boolean"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.UpdateIp.Request": {
+   "closed": false,
+   "properties": {
+    "reverse": {
+     "type": "string"
+    },
+    "server": {
+     "ref": "instance/v1.scaleway.instance.v1.NullableStringValue"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "unknown_iptype",
+      "routed_ipv4",
+      "routed_ipv6"
+     ]
+    }
+   }
+  },
+  "instance/v1.UpdatePlacementGroup.Request": {
+   "closed": false,
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "policy_mode": {
+     "type": "string",
+     "enum": [
+      "optional",
+      "enforced"
+     ]
+    },
+    "policy_type": {
+     "type": "string",
+     "enum": [
+      "max_availability",
+      "low_latency"
+     ]
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.UpdatePlacementGroupServers.Request": {
+   "closed": false,
+   "required": [
+    "servers"
+   ],
+   "properties": {
+    "servers": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.UpdatePrivateNIC.Request": {
+   "closed": false,
+   "properties": {
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.UpdateSecurityGroup.Request": {
+   "closed": false,
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "enable_default_security": {
+     "type": "boolean"
+    },
+    "inbound_default_policy": {
+     "type": "string",
+     "enum": [
+      "unknown_policy",
+      "accept",
+      "drop"
+     ]
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization_default": {
+     "type": "boolean"
+    },
+    "outbound_default_policy": {
+     "type": "string",
+     "enum": [
+      "unknown_policy",
+      "accept",
+      "drop"
+     ]
+    },
+    "project_default": {
+     "type": "boolean"
+    },
+    "stateful": {
+     "type": "boolean"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.UpdateSecurityGroupRule.Request": {
+   "closed": false,
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "unknown_action",
+      "accept",
+      "drop"
+     ]
+    },
+    "dest_port_from": {
+     "type": "integer"
+    },
+    "dest_port_to": {
+     "type": "integer"
+    },
+    "direction": {
+     "type": "string",
+     "enum": [
+      "unknown_direction",
+      "inbound",
+      "outbound"
+     ]
+    },
+    "ip_range": {
+     "type": "string"
+    },
+    "position": {
+     "type": "integer"
+    },
+    "protocol": {
+     "type": "string",
+     "enum": [
+      "unknown_protocol",
+      "TCP",
+      "UDP",
+      "ICMP",
+      "ANY"
+     ]
+    }
+   }
+  },
+  "instance/v1.UpdateServer.Request": {
+   "closed": false,
+   "properties": {
+    "admin_password_encryption_ssh_key_id": {
+     "type": "string"
+    },
+    "boot_type": {
+     "ref": "instance/v1.scaleway.instance.v1.BootType"
+    },
+    "commercial_type": {
+     "type": "string"
+    },
+    "dynamic_ip_required": {
+     "type": "boolean"
+    },
+    "enable_ipv6": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "placement_group": {
+     "type": "string"
+    },
+    "private_nics": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "protected": {
+     "type": "boolean"
+    },
+    "public_ips": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "routed_ip_enabled": {
+     "type": "boolean"
+    },
+    "security_group": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupTemplate"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "volumes": {
+     "type": "object"
+    }
+   }
+  },
+  "instance/v1.UpdateSnapshot.Request": {
+   "closed": false,
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.UpdateVolume.Request": {
+   "closed": false,
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "size": {
+     "type": "integer"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Arch": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_arch",
+    "x86_64",
+    "arm",
+    "arm64"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.AttachServerFileSystemResponse": {
+   "closed": false,
+   "properties": {
+    "server": {
+     "ref": "instance/v1.scaleway.instance.v1.Server"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.AttachServerVolumeRequest.VolumeType": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_volume_type",
+    "l_ssd",
+    "b_ssd",
+    "sbs_volume"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.AttachServerVolumeResponse": {
+   "closed": false,
+   "properties": {
+    "server": {
+     "ref": "instance/v1.scaleway.instance.v1.Server"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.BootType": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "local",
+    "bootscript",
+    "rescue"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.Bootscript": {
+   "closed": false,
+   "properties": {
+    "architecture": {
+     "ref": "instance/v1.scaleway.instance.v1.Arch"
+    },
+    "bootcmdargs": {
+     "type": "string"
+    },
+    "default": {
+     "type": "boolean"
+    },
+    "dtb": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "initrd": {
+     "type": "string"
+    },
+    "kernel": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "public": {
+     "type": "boolean"
+    },
+    "title": {
+     "type": "string"
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.CreateImageResponse": {
+   "closed": false,
+   "properties": {
+    "image": {
+     "ref": "instance/v1.scaleway.instance.v1.Image"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.CreateIpResponse": {
+   "closed": false,
+   "properties": {
+    "ip": {
+     "ref": "instance/v1.scaleway.instance.v1.Ip"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.CreatePlacementGroupResponse": {
+   "closed": false,
+   "properties": {
+    "placement_group": {
+     "ref": "instance/v1.scaleway.instance.v1.PlacementGroup"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.CreatePrivateNICResponse": {
+   "closed": false,
+   "properties": {
+    "private_nic": {
+     "ref": "instance/v1.scaleway.instance.v1.PrivateNIC"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.CreateSecurityGroupResponse": {
+   "closed": false,
+   "properties": {
+    "security_group": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroup"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.CreateSecurityGroupRuleResponse": {
+   "closed": false,
+   "properties": {
+    "rule": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.CreateServerResponse": {
+   "closed": false,
+   "properties": {
+    "server": {
+     "ref": "instance/v1.scaleway.instance.v1.Server"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.CreateSnapshotResponse": {
+   "closed": false,
+   "properties": {
+    "snapshot": {
+     "ref": "instance/v1.scaleway.instance.v1.Snapshot"
+    },
+    "task": {
+     "ref": "instance/v1.scaleway.instance.v1.Task"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.CreateVolumeResponse": {
+   "closed": false,
+   "properties": {
+    "volume": {
+     "ref": "instance/v1.scaleway.instance.v1.Volume"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Dashboard": {
+   "closed": false,
+   "properties": {
+    "images_count": {
+     "type": "integer"
+    },
+    "ips_count": {
+     "type": "integer"
+    },
+    "ips_unused": {
+     "type": "integer"
+    },
+    "placement_groups_count": {
+     "type": "integer"
+    },
+    "private_nics_count": {
+     "type": "integer"
+    },
+    "running_servers_count": {
+     "type": "integer"
+    },
+    "security_groups_count": {
+     "type": "integer"
+    },
+    "servers_by_types": {
+     "type": "object"
+    },
+    "servers_count": {
+     "type": "integer"
+    },
+    "snapshots_count": {
+     "type": "integer"
+    },
+    "volumes_b_ssd_count": {
+     "type": "integer"
+    },
+    "volumes_b_ssd_total_size": {
+     "type": "integer"
+    },
+    "volumes_count": {
+     "type": "integer"
+    },
+    "volumes_l_ssd_count": {
+     "type": "integer"
+    },
+    "volumes_l_ssd_total_size": {
+     "type": "integer"
+    },
+    "volumes_scratch_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.DetachServerFileSystemResponse": {
+   "closed": false,
+   "properties": {
+    "server": {
+     "ref": "instance/v1.scaleway.instance.v1.Server"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.DetachServerVolumeResponse": {
+   "closed": false,
+   "properties": {
+    "server": {
+     "ref": "instance/v1.scaleway.instance.v1.Server"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ExportSnapshotResponse": {
+   "closed": false,
+   "properties": {
+    "task": {
+     "ref": "instance/v1.scaleway.instance.v1.Task"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetDashboardResponse": {
+   "closed": false,
+   "properties": {
+    "dashboard": {
+     "ref": "instance/v1.scaleway.instance.v1.Dashboard"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetImageResponse": {
+   "closed": false,
+   "properties": {
+    "image": {
+     "ref": "instance/v1.scaleway.instance.v1.Image"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetIpResponse": {
+   "closed": false,
+   "properties": {
+    "ip": {
+     "ref": "instance/v1.scaleway.instance.v1.Ip"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetPlacementGroupResponse": {
+   "closed": false,
+   "properties": {
+    "placement_group": {
+     "ref": "instance/v1.scaleway.instance.v1.PlacementGroup"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetPlacementGroupServersResponse": {
+   "closed": false,
+   "properties": {
+    "servers": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.PlacementGroupServer"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetPrivateNICResponse": {
+   "closed": false,
+   "properties": {
+    "private_nic": {
+     "ref": "instance/v1.scaleway.instance.v1.PrivateNIC"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetSecurityGroupResponse": {
+   "closed": false,
+   "properties": {
+    "security_group": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroup"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetSecurityGroupRuleResponse": {
+   "closed": false,
+   "properties": {
+    "rule": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetServerResponse": {
+   "closed": false,
+   "properties": {
+    "server": {
+     "ref": "instance/v1.scaleway.instance.v1.Server"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetServerTypesAvailabilityResponse": {
+   "closed": false,
+   "properties": {
+    "servers": {
+     "type": "object"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetSnapshotResponse": {
+   "closed": false,
+   "properties": {
+    "snapshot": {
+     "ref": "instance/v1.scaleway.instance.v1.Snapshot"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.GetVolumeResponse": {
+   "closed": false,
+   "properties": {
+    "volume": {
+     "ref": "instance/v1.scaleway.instance.v1.Volume"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Image": {
+   "closed": false,
+   "properties": {
+    "arch": {
+     "ref": "instance/v1.scaleway.instance.v1.Arch"
+    },
+    "creation_date": {
+     "type": "string"
+    },
+    "default_bootscript": {
+     "ref": "instance/v1.scaleway.instance.v1.Bootscript"
+    },
+    "extra_volumes": {
+     "type": "object"
+    },
+    "from_server": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "modification_date": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "public": {
+     "type": "boolean"
+    },
+    "root_volume": {
+     "ref": "instance/v1.scaleway.instance.v1.VolumeSummary"
+    },
+    "state": {
+     "ref": "instance/v1.scaleway.instance.v1.Image.State"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Image.State": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "available",
+    "creating",
+    "error"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.Ip": {
+   "closed": false,
+   "properties": {
+    "address": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "ipam_id": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "prefix": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "reverse": {
+     "type": "string"
+    },
+    "server": {
+     "ref": "instance/v1.scaleway.instance.v1.ServerSummary"
+    },
+    "state": {
+     "ref": "instance/v1.scaleway.instance.v1.Ip.State"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "type": {
+     "ref": "instance/v1.scaleway.instance.v1.IpType"
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Ip.State": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_state",
+    "detached",
+    "attached",
+    "pending",
+    "error"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.IpType": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_iptype",
+    "routed_ipv4",
+    "routed_ipv6"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.ListImagesResponse": {
+   "closed": false,
+   "properties": {
+    "images": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Image"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListIpsResponse": {
+   "closed": false,
+   "properties": {
+    "ips": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Ip"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListPlacementGroupsResponse": {
+   "closed": false,
+   "properties": {
+    "placement_groups": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.PlacementGroup"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListPrivateNICsResponse": {
+   "closed": false,
+   "properties": {
+    "private_nics": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.PrivateNIC"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListSecurityGroupRulesResponse": {
+   "closed": false,
+   "properties": {
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListSecurityGroupsResponse": {
+   "closed": false,
+   "properties": {
+    "security_groups": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.SecurityGroup"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListServerActionsResponse": {
+   "closed": false,
+   "properties": {
+    "actions": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Server.Action"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListServerUserDataResponse": {
+   "closed": false,
+   "properties": {
+    "user_data": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListServersResponse": {
+   "closed": false,
+   "properties": {
+    "servers": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Server"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListServersTypesResponse": {
+   "closed": false,
+   "properties": {
+    "servers": {
+     "type": "object"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListSnapshotsResponse": {
+   "closed": false,
+   "properties": {
+    "snapshots": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Snapshot"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListVolumesResponse": {
+   "closed": false,
+   "properties": {
+    "volumes": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Volume"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ListVolumesTypesResponse": {
+   "closed": false,
+   "properties": {
+    "volumes": {
+     "type": "object"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.NullableStringValue": {
+   "closed": false,
+   "type": "string"
+  },
+  "instance/v1.scaleway.instance.v1.PlacementGroup": {
+   "closed": false,
+   "properties": {
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "policy_mode": {
+     "type": "string",
+     "enum": [
+      "optional",
+      "enforced"
+     ]
+    },
+    "policy_respected": {
+     "type": "boolean"
+    },
+    "policy_type": {
+     "type": "string",
+     "enum": [
+      "max_availability",
+      "low_latency"
+     ]
+    },
+    "project": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.PlacementGroup.PolicyMode": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "optional",
+    "enforced"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.PlacementGroup.PolicyType": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "max_availability",
+    "low_latency"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.PlacementGroupServer": {
+   "closed": false,
+   "properties": {
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "policy_respected": {
+     "type": "boolean"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.PrivateNIC": {
+   "closed": false,
+   "properties": {
+    "creation_date": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "ipam_ip_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "mac_address": {
+     "type": "string"
+    },
+    "private_network_id": {
+     "type": "string"
+    },
+    "server_id": {
+     "type": "string"
+    },
+    "state": {
+     "type": "string",
+     "enum": [
+      "available",
+      "syncing",
+      "syncing_error"
+     ]
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SecurityGroup": {
+   "closed": false,
+   "properties": {
+    "creation_date": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "enable_default_security": {
+     "type": "boolean"
+    },
+    "id": {
+     "type": "string"
+    },
+    "inbound_default_policy": {
+     "type": "string",
+     "enum": [
+      "unknown_policy",
+      "accept",
+      "drop"
+     ]
+    },
+    "modification_date": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "organization_default": {
+     "type": "boolean"
+    },
+    "outbound_default_policy": {
+     "type": "string",
+     "enum": [
+      "unknown_policy",
+      "accept",
+      "drop"
+     ]
+    },
+    "project": {
+     "type": "string"
+    },
+    "project_default": {
+     "type": "boolean"
+    },
+    "servers": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.ServerSummary"
+     }
+    },
+    "state": {
+     "type": "string",
+     "enum": [
+      "available",
+      "syncing",
+      "syncing_error"
+     ]
+    },
+    "stateful": {
+     "type": "boolean"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SecurityGroupRule": {
+   "closed": false,
+   "properties": {
+    "action": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule.Action"
+    },
+    "dest_port_from": {
+     "type": "integer"
+    },
+    "dest_port_to": {
+     "type": "integer"
+    },
+    "direction": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule.Direction"
+    },
+    "editable": {
+     "type": "boolean"
+    },
+    "id": {
+     "type": "string"
+    },
+    "ip_range": {
+     "type": "string"
+    },
+    "position": {
+     "type": "integer"
+    },
+    "protocol": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule.Protocol"
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SecurityGroupRule.Action": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_action",
+    "accept",
+    "drop"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.SecurityGroupRule.Direction": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_direction",
+    "inbound",
+    "outbound"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.SecurityGroupRule.Protocol": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_protocol",
+    "TCP",
+    "UDP",
+    "ICMP",
+    "ANY"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.SecurityGroupTemplate": {
+   "closed": false,
+   "properties": {
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Server": {
+   "closed": false,
+   "properties": {
+    "admin_password_encrypted_value": {
+     "type": "string"
+    },
+    "admin_password_encryption_ssh_key_id": {
+     "type": "string"
+    },
+    "allowed_actions": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Server.Action"
+     }
+    },
+    "arch": {
+     "type": "string",
+     "enum": [
+      "unknown_arch",
+      "x86_64",
+      "arm",
+      "arm64"
+     ]
+    },
+    "boot_type": {
+     "type": "string",
+     "enum": [
+      "local",
+      "bootscript",
+      "rescue"
+     ]
+    },
+    "commercial_type": {
+     "type": "string"
+    },
+    "creation_date": {
+     "type": "string"
+    },
+    "dns": {
+     "type": "string"
+    },
+    "dynamic_ip_required": {
+     "type": "boolean"
+    },
+    "enable_ipv6": {
+     "type": "boolean"
+    },
+    "end_of_service": {
+     "type": "boolean"
+    },
+    "filesystems": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Server.Filesystem"
+     }
+    },
+    "hostname": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "image": {
+     "type": "object"
+    },
+    "ipv6": {
+     "type": "object"
+    },
+    "location": {
+     "type": "object"
+    },
+    "mac_address": {
+     "type": "string"
+    },
+    "maintenances": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Server.Maintenance"
+     }
+    },
+    "modification_date": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "placement_group": {
+     "type": "object"
+    },
+    "private_ip": {
+     "type": "string"
+    },
+    "private_nics": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.PrivateNIC"
+     }
+    },
+    "project": {
+     "type": "string"
+    },
+    "protected": {
+     "type": "boolean"
+    },
+    "public_ip": {
+     "type": "object"
+    },
+    "public_ips": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.Server.Ip"
+     }
+    },
+    "routed_ip_enabled": {
+     "type": "boolean"
+    },
+    "security_group": {
+     "type": "object"
+    },
+    "state": {
+     "type": "string",
+     "enum": [
+      "running",
+      "stopped",
+      "stopped in place",
+      "starting",
+      "stopping",
+      "locked"
+     ]
+    },
+    "state_detail": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "volumes": {
+     "type": "object"
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Server.Action": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "poweron",
+    "backup",
+    "stop_in_place",
+    "poweroff",
+    "terminate",
+    "reboot",
+    "enable_routed_ip"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.Server.Filesystem": {
+   "closed": false,
+   "properties": {
+    "filesystem_id": {
+     "type": "string"
+    },
+    "state": {
+     "ref": "instance/v1.scaleway.instance.v1.Server.Filesystem.State"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Server.Filesystem.State": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_state",
+    "attaching",
+    "available",
+    "detaching"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.Server.Ip": {
+   "closed": false,
+   "properties": {
+    "address": {
+     "type": "string"
+    },
+    "dynamic": {
+     "type": "boolean"
+    },
+    "family": {
+     "type": "string",
+     "enum": [
+      "inet",
+      "inet6"
+     ]
+    },
+    "gateway": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "ipam_id": {
+     "type": "string"
+    },
+    "netmask": {
+     "type": "string"
+    },
+    "provisioning_mode": {
+     "type": "string",
+     "enum": [
+      "manual",
+      "dhcp",
+      "slaac"
+     ]
+    },
+    "state": {
+     "type": "string",
+     "enum": [
+      "unknown_state",
+      "detached",
+      "attached",
+      "pending",
+      "error"
+     ]
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Server.Maintenance": {
+   "closed": false,
+   "properties": {
+    "reason": {
+     "type": "string"
+    },
+    "start_date": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ServerActionResponse": {
+   "closed": false,
+   "properties": {
+    "task": {
+     "ref": "instance/v1.scaleway.instance.v1.Task"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ServerCompatibleTypes": {
+   "closed": false,
+   "properties": {
+    "compatible_types": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ServerSummary": {
+   "closed": false,
+   "properties": {
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ServerType.Network.Interface": {
+   "closed": false,
+   "properties": {
+    "internal_bandwidth": {
+     "type": "integer"
+    },
+    "internet_bandwidth": {
+     "type": "integer"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.ServerTypesAvailability": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "available",
+    "scarce",
+    "shortage"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.SetImageResponse": {
+   "closed": false,
+   "properties": {
+    "image": {
+     "ref": "instance/v1.scaleway.instance.v1.Image"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SetPlacementGroupResponse": {
+   "closed": false,
+   "properties": {
+    "placement_group": {
+     "ref": "instance/v1.scaleway.instance.v1.PlacementGroup"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SetPlacementGroupServersResponse": {
+   "closed": false,
+   "properties": {
+    "servers": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.PlacementGroupServer"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SetSecurityGroupResponse": {
+   "closed": false,
+   "properties": {
+    "security_group": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroup"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SetSecurityGroupRuleResponse": {
+   "closed": false,
+   "properties": {
+    "rule": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SetSecurityGroupRulesRequest.Rule": {
+   "closed": false,
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "unknown_action",
+      "accept",
+      "drop"
+     ]
+    },
+    "dest_port_from": {
+     "type": "integer"
+    },
+    "dest_port_to": {
+     "type": "integer"
+    },
+    "direction": {
+     "type": "string",
+     "enum": [
+      "unknown_direction",
+      "inbound",
+      "outbound"
+     ]
+    },
+    "editable": {
+     "type": "boolean"
+    },
+    "id": {
+     "type": "string"
+    },
+    "ip_range": {
+     "type": "string"
+    },
+    "position": {
+     "type": "integer"
+    },
+    "protocol": {
+     "type": "string",
+     "enum": [
+      "unknown_protocol",
+      "TCP",
+      "UDP",
+      "ICMP",
+      "ANY"
+     ]
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SetSecurityGroupRulesResponse": {
+   "closed": false,
+   "properties": {
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SetSnapshotResponse": {
+   "closed": false,
+   "properties": {
+    "snapshot": {
+     "ref": "instance/v1.scaleway.instance.v1.Snapshot"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.SetVolumeResponse": {
+   "closed": false,
+   "properties": {
+    "volume": {
+     "ref": "instance/v1.scaleway.instance.v1.Volume"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Snapshot": {
+   "closed": false,
+   "properties": {
+    "base_volume": {
+     "type": "object"
+    },
+    "creation_date": {
+     "type": "string"
+    },
+    "error_reason": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "modification_date": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "size": {
+     "type": "integer"
+    },
+    "state": {
+     "type": "string",
+     "enum": [
+      "available",
+      "snapshotting",
+      "error",
+      "invalid_data",
+      "importing",
+      "exporting"
+     ]
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "volume_type": {
+     "type": "string",
+     "enum": [
+      "l_ssd",
+      "b_ssd",
+      "unified",
+      "scratch",
+      "sbs_volume",
+      "sbs_snapshot"
+     ]
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Snapshot.BaseVolume": {
+   "closed": false,
+   "properties": {
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Snapshot.State": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "available",
+    "snapshotting",
+    "error",
+    "invalid_data",
+    "importing",
+    "exporting"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.Task": {
+   "closed": false,
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "href_from": {
+     "type": "string"
+    },
+    "href_result": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "progress": {
+     "type": "integer"
+    },
+    "started_at": {
+     "type": "string"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "pending",
+      "started",
+      "success",
+      "failure",
+      "retry"
+     ]
+    },
+    "terminated_at": {
+     "type": "string"
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.UpdateImageResponse": {
+   "closed": false,
+   "properties": {
+    "image": {
+     "ref": "instance/v1.scaleway.instance.v1.Image"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.UpdateIpResponse": {
+   "closed": false,
+   "properties": {
+    "ip": {
+     "ref": "instance/v1.scaleway.instance.v1.Ip"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.UpdatePlacementGroupResponse": {
+   "closed": false,
+   "properties": {
+    "placement_group": {
+     "ref": "instance/v1.scaleway.instance.v1.PlacementGroup"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.UpdatePlacementGroupServersResponse": {
+   "closed": false,
+   "properties": {
+    "servers": {
+     "type": "array",
+     "items": {
+      "ref": "instance/v1.scaleway.instance.v1.PlacementGroupServer"
+     }
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.UpdateSecurityGroupResponse": {
+   "closed": false,
+   "properties": {
+    "security_group": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroup"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.UpdateSecurityGroupRuleResponse": {
+   "closed": false,
+   "properties": {
+    "rule": {
+     "ref": "instance/v1.scaleway.instance.v1.SecurityGroupRule"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.UpdateServerResponse": {
+   "closed": false,
+   "properties": {
+    "server": {
+     "ref": "instance/v1.scaleway.instance.v1.Server"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.UpdateSnapshotResponse": {
+   "closed": false,
+   "properties": {
+    "snapshot": {
+     "ref": "instance/v1.scaleway.instance.v1.Snapshot"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.UpdateVolumeResponse": {
+   "closed": false,
+   "properties": {
+    "volume": {
+     "ref": "instance/v1.scaleway.instance.v1.Volume"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Volume": {
+   "closed": false,
+   "properties": {
+    "creation_date": {
+     "type": "string"
+    },
+    "export_uri": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "modification_date": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "server": {
+     "type": "object"
+    },
+    "size": {
+     "type": "integer"
+    },
+    "state": {
+     "type": "string",
+     "enum": [
+      "available",
+      "snapshotting",
+      "fetching",
+      "saving",
+      "attaching",
+      "resizing",
+      "hotsyncing",
+      "error"
+     ]
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "volume_type": {
+     "type": "string",
+     "enum": [
+      "l_ssd",
+      "b_ssd",
+      "unified",
+      "scratch",
+      "sbs_volume",
+      "sbs_snapshot"
+     ]
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.Volume.VolumeType": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "l_ssd",
+    "b_ssd",
+    "unified",
+    "scratch",
+    "sbs_volume",
+    "sbs_snapshot"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.VolumeServer.State": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "available",
+    "snapshotting",
+    "resizing",
+    "fetching",
+    "saving",
+    "hotsyncing",
+    "attaching",
+    "error"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.VolumeServer.VolumeType": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "l_ssd",
+    "b_ssd",
+    "sbs_volume",
+    "scratch"
+   ]
+  },
+  "instance/v1.scaleway.instance.v1.VolumeServerTemplate": {
+   "closed": false,
+   "properties": {
+    "base_snapshot": {
+     "type": "string"
+    },
+    "boot": {
+     "type": "boolean"
+    },
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization": {
+     "type": "string"
+    },
+    "project": {
+     "type": "string"
+    },
+    "size": {
+     "type": "integer"
+    },
+    "volume_type": {
+     "type": "string",
+     "enum": [
+      "l_ssd",
+      "b_ssd",
+      "unified",
+      "scratch",
+      "sbs_volume",
+      "sbs_snapshot"
+     ]
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.VolumeSummary": {
+   "closed": false,
+   "properties": {
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "size": {
+     "type": "integer"
+    },
+    "volume_type": {
+     "ref": "instance/v1.scaleway.instance.v1.Volume.VolumeType"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.VolumeType.Capabilities": {
+   "closed": false,
+   "properties": {
+    "snapshot": {
+     "type": "boolean"
+    }
+   }
+  },
+  "instance/v1.scaleway.instance.v1.VolumeType.Constraints": {
+   "closed": false,
+   "properties": {
+    "max": {
+     "type": "integer"
+    },
+    "min": {
+     "type": "integer"
+    }
+   }
+  },
+  "instance/v1.scaleway.std.File": {
+   "closed": false,
+   "properties": {
+    "content": {
+     "type": "string"
+    },
+    "content_type": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    }
+   }
+  },
+  "instance/v1.scaleway.std.StringsValue": {
+   "closed": false
+  },
+  "ipam/v1.AttachIP.Request": {
+   "closed": false,
+   "required": [
+    "resource"
+   ],
+   "properties": {
+    "resource": {
+     "type": "object"
+    }
+   }
+  },
+  "ipam/v1.BookIP.Request": {
+   "closed": false,
+   "required": [
+    "project_id",
+    "source"
+   ],
+   "properties": {
+    "address": {
+     "type": "string"
+    },
+    "is_ipv6": {
+     "type": "boolean"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "resource": {
+     "type": "object"
+    },
+    "source": {
+     "type": "object"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "ipam/v1.DetachIP.Request": {
+   "closed": false,
+   "required": [
+    "resource"
+   ],
+   "properties": {
+    "resource": {
+     "type": "object"
+    }
+   }
+  },
+  "ipam/v1.MoveIP.Request": {
+   "closed": false,
+   "required": [
+    "from_resource"
+   ],
+   "properties": {
+    "from_resource": {
+     "type": "object"
+    },
+    "to_resource": {
+     "type": "object"
+    }
+   }
+  },
+  "ipam/v1.ReleaseIPSet.Request": {
+   "closed": false,
+   "properties": {
+    "ip_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "ipam/v1.UpdateIP.Request": {
+   "closed": false,
+   "properties": {
+    "reverses": {
+     "type": "array",
+     "items": {
+      "ref": "ipam/v1.scaleway.ipam.v1.Reverse"
+     }
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "ipam/v1.scaleway.ipam.v1.IP": {
+   "closed": false,
+   "properties": {
+    "address": {
+     "type": "string"
+    },
+    "created_at": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "is_ipv6": {
+     "type": "boolean"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "region": {
+     "type": "string"
+    },
+    "resource": {
+     "type": "object"
+    },
+    "reverses": {
+     "type": "array",
+     "items": {
+      "ref": "ipam/v1.scaleway.ipam.v1.Reverse"
+     }
+    },
+    "source": {
+     "type": "object"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "ipam/v1.scaleway.ipam.v1.ListIPsResponse": {
+   "closed": false,
+   "properties": {
+    "ips": {
+     "type": "array",
+     "items": {
+      "ref": "ipam/v1.scaleway.ipam.v1.IP"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "ipam/v1.scaleway.ipam.v1.Resource.Type": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_type",
+    "custom",
+    "instance_server",
+    "instance_ip",
+    "instance_private_nic",
+    "lb_server",
+    "fip_ip",
+    "vpc_gateway",
+    "vpc_gateway_network",
+    "k8s_node",
+    "k8s_cluster",
+    "rdb_instance",
+    "redis_cluster",
+    "baremetal_server",
+    "baremetal_private_nic",
+    "llm_deployment",
+    "mgdb_instance",
+    "apple_silicon_server",
+    "apple_silicon_private_nic",
+    "serverless_container",
+    "serverless_function",
+    "vpn_gateway",
+    "ddl_datalab",
+    "kafka_cluster",
+    "bgp_endpoint",
+    "scbl_sedb_cluster",
+    "dtwh_deployment",
+    "sedb_cluster",
+    "msgq_cluster",
+    "edge_vpc_endpoint",
+    "dviz_cluster"
+   ]
+  },
+  "ipam/v1.scaleway.ipam.v1.Reverse": {
+   "closed": false,
+   "properties": {
+    "address": {
+     "type": "string"
+    },
+    "hostname": {
+     "type": "string"
+    }
+   }
+  },
+  "marketplace/v2.scaleway.marketplace.v2.Category": {
+   "closed": false,
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    }
+   }
+  },
+  "marketplace/v2.scaleway.marketplace.v2.Image": {
+   "closed": false,
+   "properties": {
+    "categories": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "created_at": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "label": {
+     "type": "string"
+    },
+    "logo": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "valid_until": {
+     "type": "string"
+    }
+   }
+  },
+  "marketplace/v2.scaleway.marketplace.v2.ListCategoriesResponse": {
+   "closed": false,
+   "properties": {
+    "categories": {
+     "type": "array",
+     "items": {
+      "ref": "marketplace/v2.scaleway.marketplace.v2.Category"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "marketplace/v2.scaleway.marketplace.v2.ListImagesResponse": {
+   "closed": false,
+   "properties": {
+    "images": {
+     "type": "array",
+     "items": {
+      "ref": "marketplace/v2.scaleway.marketplace.v2.Image"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "marketplace/v2.scaleway.marketplace.v2.ListLocalImagesResponse": {
+   "closed": false,
+   "properties": {
+    "local_images": {
+     "type": "array",
+     "items": {
+      "ref": "marketplace/v2.scaleway.marketplace.v2.LocalImage"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "marketplace/v2.scaleway.marketplace.v2.ListVersionsRequest.OrderBy": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "created_at_asc",
+    "created_at_desc"
+   ]
+  },
+  "marketplace/v2.scaleway.marketplace.v2.ListVersionsResponse": {
+   "closed": false,
+   "properties": {
+    "total_count": {
+     "type": "integer"
+    },
+    "versions": {
+     "type": "array",
+     "items": {
+      "ref": "marketplace/v2.scaleway.marketplace.v2.Version"
+     }
+    }
+   }
+  },
+  "marketplace/v2.scaleway.marketplace.v2.LocalImage": {
+   "closed": false,
+   "properties": {
+    "arch": {
+     "type": "string"
+    },
+    "compatible_commercial_types": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "id": {
+     "type": "string"
+    },
+    "label": {
+     "type": "string"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "unknown_type",
+      "instance_local",
+      "instance_sbs"
+     ]
+    },
+    "zone": {
+     "type": "string"
+    }
+   }
+  },
+  "marketplace/v2.scaleway.marketplace.v2.Version": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "published_at": {
+     "type": "string"
+    },
+    "updated_at": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.AddPrivateNetworkS3Endpoint.Request": {
+   "closed": false,
+   "required": [
+    "private_network_id"
+   ],
+   "properties": {
+    "private_network_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.CreateIngressRule.Request": {
+   "closed": false,
+   "required": [
+    "nexthop_private_network_id",
+    "nexthop_resource_ip",
+    "source",
+    "vpc_id"
+   ],
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "nexthop_private_network_id": {
+     "type": "string"
+    },
+    "nexthop_resource_ip": {
+     "type": "string"
+    },
+    "source": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.CreatePrivateNetwork.Request": {
+   "closed": false,
+   "required": [
+    "name",
+    "project_id"
+   ],
+   "properties": {
+    "default_route_propagation_enabled": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "subnets": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.CreateRoute.Request": {
+   "closed": false,
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "destination": {
+     "type": "string"
+    },
+    "nexthop_private_network_id": {
+     "type": "string"
+    },
+    "nexthop_resource_id": {
+     "type": "string"
+    },
+    "nexthop_vpc_connector_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.CreateVPC.Request": {
+   "closed": false,
+   "required": [
+    "name",
+    "project_id"
+   ],
+   "properties": {
+    "enable_routing": {
+     "type": "boolean"
+    },
+    "enable_transitivity": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "vpc/v2.CreateVPCConnector.Request": {
+   "closed": false,
+   "required": [
+    "name"
+   ],
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "target_vpc_id": {
+     "type": "string"
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.SetAcl.Request": {
+   "closed": false,
+   "required": [
+    "default_policy",
+    "is_ipv6",
+    "rules"
+   ],
+   "properties": {
+    "default_policy": {
+     "type": "string",
+     "enum": [
+      "unknown_action",
+      "accept",
+      "drop"
+     ]
+    },
+    "is_ipv6": {
+     "type": "boolean"
+    },
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.AclRule"
+     }
+    }
+   }
+  },
+  "vpc/v2.SetPrivateNetworksS3Endpoint.Request": {
+   "closed": false,
+   "required": [
+    "private_network_ids"
+   ],
+   "properties": {
+    "private_network_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "vpc/v2.UpdateIngressRule.Request": {
+   "closed": false,
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "nexthop_private_network_id": {
+     "type": "string"
+    },
+    "nexthop_resource_ip": {
+     "type": "string"
+    },
+    "source": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "vpc/v2.UpdatePrivateNetwork.Request": {
+   "closed": false,
+   "properties": {
+    "default_route_propagation_enabled": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "vpc/v2.UpdateRoute.Request": {
+   "closed": false,
+   "properties": {
+    "description": {
+     "type": "string"
+    },
+    "destination": {
+     "type": "string"
+    },
+    "nexthop_private_network_id": {
+     "type": "string"
+    },
+    "nexthop_resource_id": {
+     "type": "string"
+    },
+    "nexthop_vpc_connector_id": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "vpc/v2.UpdateVPC.Request": {
+   "closed": false,
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "vpc/v2.UpdateVPCConnector.Request": {
+   "closed": false,
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.AclRule": {
+   "closed": false,
+   "required": [
+    "action",
+    "description",
+    "destination",
+    "dst_port_high",
+    "dst_port_low",
+    "protocol",
+    "source",
+    "src_port_high",
+    "src_port_low"
+   ],
+   "properties": {
+    "action": {
+     "type": "string",
+     "enum": [
+      "unknown_action",
+      "accept",
+      "drop"
+     ]
+    },
+    "description": {
+     "type": "string"
+    },
+    "destination": {
+     "type": "string"
+    },
+    "dst_port_high": {
+     "type": "integer"
+    },
+    "dst_port_low": {
+     "type": "integer"
+    },
+    "protocol": {
+     "type": "string",
+     "enum": [
+      "ANY",
+      "TCP",
+      "UDP",
+      "ICMP"
+     ]
+    },
+    "source": {
+     "type": "string"
+    },
+    "src_port_high": {
+     "type": "integer"
+    },
+    "src_port_low": {
+     "type": "integer"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.Action": {
+   "closed": false,
+   "type": "string",
+   "enum": [
+    "unknown_action",
+    "accept",
+    "drop"
+   ]
+  },
+  "vpc/v2.scaleway.vpc.v2.AddPrivateNetworkS3EndpointResponse": {
+   "closed": false,
+   "properties": {
+    "private_network_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.GetAclResponse": {
+   "closed": false,
+   "properties": {
+    "default_policy": {
+     "ref": "vpc/v2.scaleway.vpc.v2.Action"
+    },
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.AclRule"
+     }
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.IngressRule": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "is_ipv6": {
+     "type": "boolean"
+    },
+    "nexthop_private_network_id": {
+     "type": "string"
+    },
+    "nexthop_resource_ip": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "region": {
+     "type": "string"
+    },
+    "source": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.ListIngressRulesResponse": {
+   "closed": false,
+   "properties": {
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.IngressRule"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.ListPrivateNetworksResponse": {
+   "closed": false,
+   "properties": {
+    "private_networks": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.PrivateNetwork"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.ListSubnetOverlapsResponse": {
+   "closed": false,
+   "properties": {
+    "subnet_overlaps": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.ListSubnetOverlapsResponse.SubnetOverlap"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.ListSubnetOverlapsResponse.SubnetOverlap": {
+   "closed": false,
+   "properties": {
+    "subnet": {
+     "type": "string"
+    },
+    "subnet_id": {
+     "type": "string"
+    },
+    "target_subnet": {
+     "type": "string"
+    },
+    "target_subnet_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.ListSubnetsResponse": {
+   "closed": false,
+   "properties": {
+    "subnets": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.Subnet"
+     }
+    },
+    "total_count": {
+     "type": "integer"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.ListVPCConnectorsResponse": {
+   "closed": false,
+   "properties": {
+    "total_count": {
+     "type": "integer"
+    },
+    "vpc_connectors": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.VPCConnector"
+     }
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.ListVPCsResponse": {
+   "closed": false,
+   "properties": {
+    "total_count": {
+     "type": "integer"
+    },
+    "vpcs": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.VPC"
+     }
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.PrivateNetwork": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "default_route_propagation_enabled": {
+     "type": "boolean"
+    },
+    "dhcp_enabled": {
+     "type": "boolean"
+    },
+    "has_s3_integration": {
+     "type": "boolean"
+    },
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "region": {
+     "type": "string"
+    },
+    "subnets": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.Subnet"
+     }
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.Route": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "destination": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "is_read_only": {
+     "type": "boolean"
+    },
+    "nexthop_private_network_id": {
+     "type": "string"
+    },
+    "nexthop_resource_id": {
+     "type": "string"
+    },
+    "nexthop_vpc_connector_id": {
+     "type": "string"
+    },
+    "region": {
+     "type": "string"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "unknown_route_type",
+      "subnet",
+      "default",
+      "custom",
+      "interlink",
+      "s2s_vpn"
+     ]
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.SetAclResponse": {
+   "closed": false,
+   "properties": {
+    "default_policy": {
+     "ref": "vpc/v2.scaleway.vpc.v2.Action"
+    },
+    "rules": {
+     "type": "array",
+     "items": {
+      "ref": "vpc/v2.scaleway.vpc.v2.AclRule"
+     }
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.SetPrivateNetworksS3EndpointResponse": {
+   "closed": false,
+   "properties": {
+    "private_network_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.Subnet": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "private_network_id": {
+     "type": "string"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "region": {
+     "type": "string"
+    },
+    "subnet": {
+     "type": "string"
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.VPC": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "custom_routes_propagation_enabled": {
+     "type": "boolean"
+    },
+    "id": {
+     "type": "string"
+    },
+    "is_default": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "private_network_count": {
+     "type": "integer"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "region": {
+     "type": "string"
+    },
+    "routing_enabled": {
+     "type": "boolean"
+    },
+    "s3_integration_enabled": {
+     "type": "boolean"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "transitivity_enabled": {
+     "type": "boolean"
+    },
+    "updated_at": {
+     "type": "string"
+    }
+   }
+  },
+  "vpc/v2.scaleway.vpc.v2.VPCConnector": {
+   "closed": false,
+   "properties": {
+    "created_at": {
+     "type": "string"
+    },
+    "id": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "organization_id": {
+     "type": "string"
+    },
+    "peer_info": {
+     "type": "object"
+    },
+    "project_id": {
+     "type": "string"
+    },
+    "region": {
+     "type": "string"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "unknown_vpc_connector_status",
+      "orphan",
+      "peered",
+      "conflict"
+     ]
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "target_vpc_id": {
+     "type": "string"
+    },
+    "updated_at": {
+     "type": "string"
+    },
+    "vpc_id": {
+     "type": "string"
+    }
+   }
+  }
+ }
+}

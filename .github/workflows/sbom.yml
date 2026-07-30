@@ -1,0 +1,70 @@
+name: SBOM
+
+# A software bill of materials on every push to main, not only at release time.
+#
+# The release workflow already attaches a CycloneDX SBOM to each tag. This one runs continuously,
+# so what main contains is documented between releases too — which is when a dependency would
+# actually appear, zero dependencies being something people can break before anyone tags.
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+permissions: {}
+
+# Two jobs for one tool, because only one of the two triggers needs a token that
+# can write. Attaching an asset to a release does; documenting what main contains
+# does not, and a push job holding contents: write is a standing capability
+# nothing in it uses.
+jobs:
+  main:
+    name: Syft SBOM (main)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Anchore SBOM Action (Syft)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          format: spdx-json
+          output-file: feint.spdx.json
+          artifact-name: feint.spdx.json
+          upload-artifact: true
+          upload-release-assets: false
+
+  release:
+    name: Syft SBOM (release asset)
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # attach the SBOM to release assets
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Anchore SBOM Action (Syft)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          format: spdx-json
+          output-file: feint.spdx.json
+          artifact-name: feint.spdx.json
+          upload-artifact: true
+          upload-release-assets: true

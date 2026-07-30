@@ -1,0 +1,62 @@
+# The commit subjects of a pull request, checked by the same tool the local hook
+# runs.
+#
+# It exists because the local hook cannot be relied on. Git hooks live in
+# .git/hooks/, which no clone carries, so `pre-commit install` is a step a
+# contributor can skip and `--no-verify` is one keystroke. Without this workflow,
+# Conventional Commits would be a convention held by whoever happens to have the
+# hook installed.
+#
+# It is not cosmetic. `cz bump` derives the next version from these subjects:
+# feat moves the minor, fix the patch, a `!` marks the break. A subject that does
+# not parse is a release that computes the wrong number, and the number is what
+# users pin.
+name: Commits
+
+on:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conventional:
+    name: Conventional Commits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      # The whole range has to be reachable: cz checks base..head, and a shallow
+      # clone would hand it a range git cannot resolve.
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install commitizen (pinned, same version as the hook)
+        env:
+          CZ_VERSION: '4.16.5'
+        run: pip install --no-cache-dir "commitizen==${CZ_VERSION}"
+
+      # The range, not the working tree: this says nothing about the files and
+      # everything about the messages the branch adds.
+      - name: Check the subjects this branch adds
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: cz check --rev-range "${BASE_SHA}..${HEAD_SHA}"

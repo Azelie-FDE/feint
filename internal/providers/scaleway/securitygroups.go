@@ -1,0 +1,827 @@
+package scaleway
+
+import (
+	"net/http"
+	"net/netip"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/stephrobert/feint/internal/core/emulator"
+	"github.com/stephrobert/feint/internal/core/resource"
+)
+
+// Security groups are the control plane of the Scaleway firewall: a group holds
+// a default policy per direction, and an ordered list of rules that override it.
+//
+// The emulator serves the whole product and applies none of it. That gap is
+// deliberate and must stay visible (docs/limits.md): a client can create groups
+// and rules, read them back identically and drive Terraform through a full
+// apply/destroy, but no packet is ever filtered. Pretending otherwise would be
+// the exact defect this project criticises elsewhere.
+//
+// Shapes come from the SDK (api/instance/v1/instance_sdk.go): SecurityGroup,
+// SecurityGroupRule, and the Create/List/Get/Update request and response types.
+// Two asymmetries there cost time if missed. A create takes `security_group` as
+// a bare ID string on the server request, while a read returns it as a
+// SecurityGroupSummary object. And a rule carries no reference to its group in
+// its wire shape, so the link lives in Runtime, which views never serialize.
+
+const (
+	kindSecurityGroup     = "instance/security-group"
+	kindSecurityGroupRule = "instance/security-group-rule"
+)
+
+// runtimeGroupKey links a rule to the group that owns it, out of Attrs so it
+// cannot leak into a response the SDK would fail to decode.
+const runtimeGroupKey = "security_group"
+
+// defaultSecurityGroupName is what a project gets before anyone creates one.
+// Provisioning it is not a convenience: every client reads the existing groups
+// before it creates anything, and a project with none is a state the real API
+// never returns.
+const defaultSecurityGroupName = "Default security group"
+
+// The emulated default group accepts everything in both directions. Scaleway's
+// own default is more subtle, and its exact rule set cannot be read from the
+// SDK, which carries shapes and not values. Accepting everything is the only
+// honest choice for a runtime that filters nothing: a restrictive policy here
+// would show a client rules that no packet ever meets.
+const (
+	policyAccept = "accept"
+	policyDrop   = "drop"
+)
+
+var (
+	validPolicies   = map[string]bool{policyAccept: true, policyDrop: true}
+	validDirections = map[string]bool{"inbound": true, "outbound": true}
+	validActions    = map[string]bool{policyAccept: true, policyDrop: true}
+	validProtocols  = map[string]bool{"TCP": true, "UDP": true, "ICMP": true, "ANY": true}
+)
+
+type createSecurityGroupRequest struct {
+	Name                  string   `json:"name"`
+	Description           string   `json:"description"`
+	Project               string   `json:"project"`
+	Organization          string   `json:"organization"`
+	Tags                  []string `json:"tags"`
+	OrganizationDefault   *bool    `json:"organization_default"`
+	ProjectDefault        *bool    `json:"project_default"`
+	Stateful              *bool    `json:"stateful"`
+	InboundDefaultPolicy  string   `json:"inbound_default_policy"`
+	OutboundDefaultPolicy string   `json:"outbound_default_policy"`
+	EnableDefaultSecurity *bool    `json:"enable_default_security"`
+}
+
+type updateSecurityGroupRequest struct {
+	Name                  *string   `json:"name"`
+	Description           *string   `json:"description"`
+	Tags                  *[]string `json:"tags"`
+	ProjectDefault        *bool     `json:"project_default"`
+	OrganizationDefault   *bool     `json:"organization_default"`
+	Stateful              *bool     `json:"stateful"`
+	InboundDefaultPolicy  string    `json:"inbound_default_policy"`
+	OutboundDefaultPolicy string    `json:"outbound_default_policy"`
+	EnableDefaultSecurity *bool     `json:"enable_default_security"`
+}
+
+// ruleRequest covers create, update and one entry of a set: the three carry the
+// same fields, only their optionality differs. Ports are pointers because the
+// API distinguishes "unset" from zero, and Terraform reads that difference back.
+type ruleRequest struct {
+	ID           *string `json:"id"`
+	Protocol     string  `json:"protocol"`
+	Direction    string  `json:"direction"`
+	Action       string  `json:"action"`
+	IPRange      string  `json:"ip_range"`
+	DestPortFrom *uint32 `json:"dest_port_from"`
+	DestPortTo   *uint32 `json:"dest_port_to"`
+	Position     *uint32 `json:"position"`
+	Editable     *bool   `json:"editable"`
+	// Zone is sent by the CLI and by Terraform on every rule of a
+	// SetSecurityGroupRules call, and was silently dropped. It is read now and
+	// checked rather than honoured: a rule belongs to the group, and the group
+	// to a zone, so a rule naming another one is a request the emulator has no
+	// honest answer for.
+	Zone string `json:"zone"`
+}
+
+type setSecurityGroupRulesRequest struct {
+	Rules []ruleRequest `json:"rules"`
+}
+
+// rulesBelongTo reports the first rule naming a zone other than the group's.
+// Empty means every rule agrees, which is what a client sends.
+func rulesBelongTo(zone string, rules []ruleRequest) string {
+	for _, rule := range rules {
+		if rule.Zone != "" && rule.Zone != zone {
+			return rule.Zone
+		}
+	}
+	return ""
+}
+
+// ---- Groups -----------------------------------------------------------------
+
+func (p *Pack) listSecurityGroups(w http.ResponseWriter, r *http.Request) {
+	zone, ok := zoneOf(w, r)
+	if !ok {
+		return
+	}
+	project := orDefault(r.URL.Query().Get("project"), defaultProject)
+	p.ensureDefaultSecurityGroup(zone, project)
+
+	// Scoped to the project, not just to the zone. The SDK sends the configured
+	// project on every list, and a client that names one must not be shown
+	// another one's groups: it would read several groups each claiming to be the
+	// project default, which is what a per-project lazy default produces as soon
+	// as a second project is named.
+	all := p.env.Store.List(kindSecurityGroup, resource.Tenant{Provider: Name, Project: project, Zone: zone})
+	if name := r.URL.Query().Get("name"); name != "" {
+		filtered := all[:0]
+		for _, res := range all {
+			if res.Attrs["name"] == name {
+				filtered = append(filtered, res)
+			}
+		}
+		all = filtered
+	}
+
+	page := parsePage(r)
+	start, end := page.slice(len(all))
+	groups := make([]map[string]any, 0, end-start)
+	for _, res := range all[start:end] {
+		groups = append(groups, p.securityGroupView(res))
+	}
+
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{
+		"security_groups": groups,
+		"total_count":     len(all),
+	})
+}
+
+func (p *Pack) createSecurityGroup(w http.ResponseWriter, r *http.Request) {
+	zone, ok := zoneOf(w, r)
+	if !ok {
+		return
+	}
+
+	var req createSecurityGroupRequest
+	if err := emulator.DecodeJSON(r, &req); err != nil {
+		writeInvalidArguments(w, ArgumentError{ArgumentName: "body", Reason: "format", HelpMessage: err.Error()})
+		return
+	}
+	if req.Name == "" {
+		writeInvalidArguments(w, ArgumentError{ArgumentName: "name", Reason: "required"})
+		return
+	}
+	inbound, ok := policyOrDefault(w, "inbound_default_policy", req.InboundDefaultPolicy)
+	if !ok {
+		return
+	}
+	outbound, ok := policyOrDefault(w, "outbound_default_policy", req.OutboundDefaultPolicy)
+	if !ok {
+		return
+	}
+
+	project, _ := projectOf(req.Project)
+	res := p.newSecurityGroup(zone, project, req.Name, req.Description, inbound, outbound)
+	res.Attrs["tags"] = orEmpty(req.Tags)
+	res.Attrs["stateful"] = deref(req.Stateful, true)
+	res.Attrs["enable_default_security"] = deref(req.EnableDefaultSecurity, true)
+
+	// A group asking to become the project default demotes the previous one:
+	// two defaults in a project is a state the API cannot return, and a client
+	// that reads both has no way to choose.
+	if deref(req.ProjectDefault, false) || deref(req.OrganizationDefault, false) {
+		p.clearProjectDefault(zone, project)
+		res.Attrs["project_default"] = true
+		res.Attrs["organization_default"] = true
+	}
+	p.env.Store.Put(res)
+
+	emulator.WriteJSON(w, http.StatusCreated, map[string]any{"security_group": p.securityGroupView(res)})
+}
+
+func (p *Pack) getSecurityGroup(w http.ResponseWriter, r *http.Request) {
+	res, ok := p.securityGroupOf(w, r)
+	if !ok {
+		return
+	}
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{"security_group": p.securityGroupView(res)})
+}
+
+func (p *Pack) updateSecurityGroup(w http.ResponseWriter, r *http.Request) {
+	res, ok := p.securityGroupOf(w, r)
+	if !ok {
+		return
+	}
+
+	var req updateSecurityGroupRequest
+	if err := emulator.DecodeJSON(r, &req); err != nil {
+		writeInvalidArguments(w, ArgumentError{ArgumentName: "body", Reason: "format", HelpMessage: err.Error()})
+		return
+	}
+	if req.InboundDefaultPolicy != "" {
+		if !validPolicies[req.InboundDefaultPolicy] {
+			writePolicyError(w, "inbound_default_policy", req.InboundDefaultPolicy)
+			return
+		}
+		res.Attrs["inbound_default_policy"] = req.InboundDefaultPolicy
+	}
+	if req.OutboundDefaultPolicy != "" {
+		if !validPolicies[req.OutboundDefaultPolicy] {
+			writePolicyError(w, "outbound_default_policy", req.OutboundDefaultPolicy)
+			return
+		}
+		res.Attrs["outbound_default_policy"] = req.OutboundDefaultPolicy
+	}
+	if req.Name != nil {
+		res.Attrs["name"] = *req.Name
+	}
+	if req.Description != nil {
+		res.Attrs["description"] = *req.Description
+	}
+	if req.Tags != nil {
+		res.Attrs["tags"] = orEmpty(*req.Tags)
+	}
+	if req.Stateful != nil {
+		res.Attrs["stateful"] = *req.Stateful
+	}
+	if req.EnableDefaultSecurity != nil {
+		res.Attrs["enable_default_security"] = *req.EnableDefaultSecurity
+	}
+	if deref(req.ProjectDefault, false) || deref(req.OrganizationDefault, false) {
+		p.clearProjectDefault(res.Tenant.Zone, res.Tenant.Project)
+		res.Attrs["project_default"] = true
+		res.Attrs["organization_default"] = true
+	}
+
+	res.Updated = p.env.Now()
+	p.env.Store.Put(res)
+	p.syncSecurityGroup(r.Context(), res)
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{"security_group": p.securityGroupView(res)})
+}
+
+func (p *Pack) deleteSecurityGroup(w http.ResponseWriter, r *http.Request) {
+	res, ok := p.securityGroupOf(w, r)
+	if !ok {
+		return
+	}
+	// The API refuses to delete the project default, and Terraform depends on
+	// that error: without it a destroy silently removes the group every later
+	// server creation needs.
+	if isProjectDefault(res) {
+		emulator.WriteJSON(w, http.StatusBadRequest, APIError{
+			Type:       "precondition_failed",
+			Message:    "cannot delete the default security group of the project",
+			Resource:   "security_group",
+			ResourceID: res.ID,
+		})
+		return
+	}
+	if servers := p.serversUsing(res); len(servers) > 0 {
+		emulator.WriteJSON(w, http.StatusBadRequest, APIError{
+			Type:       "precondition_failed",
+			Message:    "security group is still attached to " + servers[0] + " and cannot be deleted",
+			Resource:   "security_group",
+			ResourceID: res.ID,
+		})
+		return
+	}
+
+	for _, rule := range p.rulesOf(res.ID) {
+		p.env.Store.Delete(Name, kindSecurityGroupRule, rule.ID)
+	}
+	p.env.Store.Delete(Name, kindSecurityGroup, res.ID)
+	// The runtime rule set goes with the group that justified it. Left behind it
+	// would outlive its group until the next sweep, and a later group could not
+	// reuse its name.
+	p.removeFirewall(r.Context(), res)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- Rules ------------------------------------------------------------------
+
+func (p *Pack) listSecurityGroupRules(w http.ResponseWriter, r *http.Request) {
+	group, ok := p.securityGroupOf(w, r)
+	if !ok {
+		return
+	}
+
+	all := p.rulesOf(group.ID)
+	page := parsePage(r)
+	start, end := page.slice(len(all))
+	rules := make([]map[string]any, 0, end-start)
+	for _, res := range all[start:end] {
+		rules = append(rules, ruleView(res))
+	}
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{"rules": rules, "total_count": len(all)})
+}
+
+func (p *Pack) createSecurityGroupRule(w http.ResponseWriter, r *http.Request) {
+	group, ok := p.securityGroupOf(w, r)
+	if !ok {
+		return
+	}
+
+	var req ruleRequest
+	if err := emulator.DecodeJSON(r, &req); err != nil {
+		writeInvalidArguments(w, ArgumentError{ArgumentName: "body", Reason: "format", HelpMessage: err.Error()})
+		return
+	}
+	res, ok := p.newRule(w, group, req, nextPosition(len(p.rulesOf(group.ID))))
+	if !ok {
+		return
+	}
+	p.env.Store.Put(res)
+	p.syncSecurityGroup(r.Context(), group)
+
+	emulator.WriteJSON(w, http.StatusCreated, map[string]any{"rule": ruleView(res)})
+}
+
+// setSecurityGroupRules replaces the whole list in one call. Terraform uses it
+// for every rule change, so the response must describe the final state: rules
+// that were not sent are gone, and the ones that were keep their ID when the
+// request carried it.
+func (p *Pack) setSecurityGroupRules(w http.ResponseWriter, r *http.Request) {
+	group, ok := p.securityGroupOf(w, r)
+	if !ok {
+		return
+	}
+
+	var req setSecurityGroupRulesRequest
+	if err := emulator.DecodeJSON(r, &req); err != nil {
+		writeInvalidArguments(w, ArgumentError{ArgumentName: "body", Reason: "format", HelpMessage: err.Error()})
+		return
+	}
+	if other := rulesBelongTo(group.Tenant.Zone, req.Rules); other != "" {
+		writeInvalidArguments(w, ArgumentError{
+			ArgumentName: "rules.zone",
+			Reason:       "constraint",
+			HelpMessage:  "rule in zone " + other + " on a group in " + group.Tenant.Zone,
+		})
+		return
+	}
+
+	kept := make(map[string]bool, len(req.Rules))
+	built := make([]*resource.Resource, 0, len(req.Rules))
+	for i, rule := range req.Rules {
+		res, ok := p.newRule(w, group, rule, nextPosition(i))
+		if !ok {
+			return
+		}
+		// An ID is honoured only when it names a rule of this group. Otherwise a
+		// caller could hand over the ID of another group's rule and take it
+		// over: the rule would be rewritten under the thief's group, and it
+		// would vanish from the one that owns it.
+		if rule.ID != nil && *rule.ID != "" {
+			existing, found := p.env.Store.Get(Name, kindSecurityGroupRule, *rule.ID)
+			if found && existing.Runtime[runtimeGroupKey] == group.ID {
+				res.ID = existing.ID
+				res.Created = existing.Created
+			}
+		}
+		kept[res.ID] = true
+		built = append(built, res)
+	}
+
+	// Drop first, then store: a rule kept under its own ID must survive, and a
+	// rule the caller left out must not.
+	for _, existing := range p.rulesOf(group.ID) {
+		if !kept[existing.ID] {
+			p.env.Store.Delete(Name, kindSecurityGroupRule, existing.ID)
+		}
+	}
+	rules := make([]map[string]any, 0, len(built))
+	for _, res := range built {
+		p.env.Store.Put(res)
+		rules = append(rules, ruleView(res))
+	}
+
+	p.syncSecurityGroup(r.Context(), group)
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{"rules": rules})
+}
+
+func (p *Pack) getSecurityGroupRule(w http.ResponseWriter, r *http.Request) {
+	res, ok := p.securityGroupRuleOf(w, r)
+	if !ok {
+		return
+	}
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{"rule": ruleView(res)})
+}
+
+func (p *Pack) updateSecurityGroupRule(w http.ResponseWriter, r *http.Request) {
+	res, ok := p.securityGroupRuleOf(w, r)
+	if !ok {
+		return
+	}
+
+	var req ruleRequest
+	if err := emulator.DecodeJSON(r, &req); err != nil {
+		writeInvalidArguments(w, ArgumentError{ArgumentName: "body", Reason: "format", HelpMessage: err.Error()})
+		return
+	}
+	if req.Protocol != "" {
+		if !validProtocols[req.Protocol] {
+			writeEnumError(w, "protocol", req.Protocol)
+			return
+		}
+		res.Attrs["protocol"] = req.Protocol
+	}
+	if req.Direction != "" {
+		if !validDirections[req.Direction] {
+			writeEnumError(w, "direction", req.Direction)
+			return
+		}
+		res.Attrs["direction"] = req.Direction
+	}
+	if req.Action != "" {
+		if !validActions[req.Action] {
+			writeEnumError(w, "action", req.Action)
+			return
+		}
+		res.Attrs["action"] = req.Action
+	}
+	if req.IPRange != "" {
+		ipRange, ok := normalizeIPRange(req.IPRange)
+		if !ok {
+			writeInvalidArguments(w, ArgumentError{
+				ArgumentName: "ip_range",
+				Reason:       "constraint",
+				HelpMessage:  "not an IP network: " + req.IPRange,
+			})
+			return
+		}
+		res.Attrs["ip_range"] = ipRange
+	}
+	// A zero port unsets the bound, which the SDK documents on the update
+	// request. Anything else would leave a rule Terraform cannot narrow back.
+	if req.DestPortFrom != nil {
+		res.Attrs["dest_port_from"] = portOrNil(req.DestPortFrom)
+	}
+	if req.DestPortTo != nil {
+		res.Attrs["dest_port_to"] = portOrNil(req.DestPortTo)
+	}
+	if req.Position != nil {
+		res.Attrs["position"] = *req.Position
+	}
+
+	res.Updated = p.env.Now()
+	p.env.Store.Put(res)
+	if group, found := p.env.Store.Get(Name, kindSecurityGroup, res.Runtime[runtimeGroupKey]); found {
+		p.syncSecurityGroup(r.Context(), group)
+	}
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{"rule": ruleView(res)})
+}
+
+func (p *Pack) deleteSecurityGroupRule(w http.ResponseWriter, r *http.Request) {
+	res, ok := p.securityGroupRuleOf(w, r)
+	if !ok {
+		return
+	}
+	groupID := res.Runtime[runtimeGroupKey]
+	p.env.Store.Delete(Name, kindSecurityGroupRule, res.ID)
+	if group, found := p.env.Store.Get(Name, kindSecurityGroup, groupID); found {
+		p.syncSecurityGroup(r.Context(), group)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- Default inventory ------------------------------------------------------
+
+// ensureDefaultSecurityGroup provisions the group a fresh project already has.
+//
+// It is lazy on purpose: the emulator has no notion of "a project was created",
+// so the first read of a zone is the only moment it can happen. The mutex is
+// what keeps two concurrent reads from provisioning it twice; the store offers
+// no compare-and-set, and a duplicated default is a state no client expects.
+func (p *Pack) ensureDefaultSecurityGroup(zone, project string) *resource.Resource {
+	p.defaults.Lock()
+	defer p.defaults.Unlock()
+
+	for _, res := range p.env.Store.List(kindSecurityGroup, resource.Tenant{Provider: Name, Project: project, Zone: zone}) {
+		if isProjectDefault(res) {
+			return res
+		}
+	}
+
+	res := p.newSecurityGroup(zone, project, defaultSecurityGroupName,
+		"Default security group", policyAccept, policyAccept)
+	res.Attrs["project_default"] = true
+	res.Attrs["organization_default"] = true
+	p.env.Store.Put(res)
+	return res
+}
+
+// defaultSecurityGroupSummary is what a server carries: the {id, name} pair the
+// SDK decodes into SecurityGroupSummary, never the full group.
+func (p *Pack) defaultSecurityGroupSummary(zone, project string) map[string]any {
+	res := p.ensureDefaultSecurityGroup(zone, project)
+	return summaryOf(res)
+}
+
+// securityGroupSummary resolves the group a create request asked for by ID,
+// falling back to the project default. An unknown ID is reported rather than
+// silently replaced: a server attached to a group the caller did not ask for is
+// worse than a clear error.
+func (p *Pack) securityGroupSummary(zone, project, id string) (map[string]any, bool) {
+	if id == "" {
+		return p.defaultSecurityGroupSummary(zone, project), true
+	}
+	res, found := p.env.Store.Get(Name, kindSecurityGroup, id)
+	// The project is checked as well as the zone. A project is an isolation
+	// boundary, which scopeOf defends on every list, and checking only the zone
+	// here let a client attach another project's group to its own server —
+	// crossing the one boundary the rest of this pack is careful about.
+	if !found || res.Tenant.Zone != zone || res.Tenant.Project != project {
+		return nil, false
+	}
+	return summaryOf(res), true
+}
+
+// ---- Plumbing ---------------------------------------------------------------
+
+func (p *Pack) newSecurityGroup(zone, project, name, description, inbound, outbound string) *resource.Resource {
+	now := p.env.Now()
+	return &resource.Resource{
+		ID:      p.env.NewID(),
+		Kind:    kindSecurityGroup,
+		Tenant:  resource.Tenant{Provider: Name, Project: project, Zone: zone},
+		State:   "available",
+		Created: now,
+		Updated: now,
+		Attrs: map[string]any{
+			"name":                    name,
+			"description":             description,
+			"organization":            defaultOrganization,
+			"project":                 project,
+			"tags":                    []string{},
+			"inbound_default_policy":  inbound,
+			"outbound_default_policy": outbound,
+			"enable_default_security": true,
+			"stateful":                true,
+			"project_default":         false,
+			"organization_default":    false,
+			"servers":                 []any{},
+		},
+	}
+}
+
+// newRule validates a rule request and builds the resource, without storing it:
+// set-rules needs to reject the whole batch before it changes anything.
+func (p *Pack) newRule(w http.ResponseWriter, group *resource.Resource, req ruleRequest, position uint32) (*resource.Resource, bool) {
+	protocol := orDefault(req.Protocol, "TCP")
+	if !validProtocols[protocol] {
+		writeEnumError(w, "protocol", protocol)
+		return nil, false
+	}
+	direction := orDefault(req.Direction, "inbound")
+	if !validDirections[direction] {
+		writeEnumError(w, "direction", direction)
+		return nil, false
+	}
+	action := orDefault(req.Action, policyAccept)
+	if !validActions[action] {
+		writeEnumError(w, "action", action)
+		return nil, false
+	}
+	ipRange, ok := normalizeIPRange(req.IPRange)
+	if !ok {
+		writeInvalidArguments(w, ArgumentError{
+			ArgumentName: "ip_range",
+			Reason:       "constraint",
+			HelpMessage:  "not an IP network: " + req.IPRange,
+		})
+		return nil, false
+	}
+	if req.Position != nil && *req.Position > 0 {
+		position = *req.Position
+	}
+
+	now := p.env.Now()
+	res := &resource.Resource{
+		ID:      p.env.NewID(),
+		Kind:    kindSecurityGroupRule,
+		Tenant:  group.Tenant,
+		State:   "available",
+		Created: now,
+		Updated: now,
+		Attrs: map[string]any{
+			"protocol":  protocol,
+			"direction": direction,
+			"action":    action,
+			// The SDK decodes ip_range into scw.IPNet, which requires a CIDR:
+			// a bare address makes the client fail on the response it just got.
+			"ip_range":       ipRange,
+			"dest_port_from": portOrNil(req.DestPortFrom),
+			"dest_port_to":   portOrNil(req.DestPortTo),
+			"position":       position,
+			"editable":       deref(req.Editable, true),
+		},
+		Runtime: map[string]string{runtimeGroupKey: group.ID},
+	}
+	return res, true
+}
+
+// normalizeIPRange validates a rule's ip_range the way the SDK reads it: a bare
+// address gets its host mask, anything unparseable is refused.
+//
+// Refusing matters beyond hygiene. The runtime rejects a rule set holding an
+// invalid block wholesale, so a stored-but-unparseable ip_range would leave the
+// machine enforcing the previous rules while the API describes the new ones,
+// which is the exact class of lie this emulator exists to avoid. Measured on
+// incus 7.2: one bad rule and the whole PUT is refused.
+func normalizeIPRange(raw string) (string, bool) {
+	if raw == "" {
+		return "0.0.0.0/0", true
+	}
+	if !strings.Contains(raw, "/") {
+		addr, err := netip.ParseAddr(raw)
+		switch {
+		case err != nil:
+			return "", false
+		case addr.Is4():
+			return raw + "/32", true
+		default:
+			return raw + "/128", true
+		}
+	}
+	if _, err := netip.ParsePrefix(raw); err != nil {
+		return "", false
+	}
+	return raw, true
+}
+
+// rulesOf returns the rules of a group, ordered by position: the API serves an
+// ordered list, and a client that reorders rules reads the order back.
+func (p *Pack) rulesOf(groupID string) []*resource.Resource {
+	all := p.env.Store.List(kindSecurityGroupRule, resource.Tenant{Provider: Name})
+	rules := make([]*resource.Resource, 0, len(all))
+	for _, res := range all {
+		if res.Runtime[runtimeGroupKey] == groupID {
+			rules = append(rules, res)
+		}
+	}
+	sort.SliceStable(rules, func(i, j int) bool {
+		return positionOf(rules[i]) < positionOf(rules[j])
+	})
+	return rules
+}
+
+// serversUsing names the servers still attached to a group, so a delete can
+// refuse with the same precondition the API enforces.
+func (p *Pack) serversUsing(group *resource.Resource) []string {
+	var names []string
+	for _, res := range p.env.Store.List(kindServer, p.tenant(group.Tenant.Zone)) {
+		summary, _ := res.Attrs["security_group"].(map[string]any)
+		if summary != nil && summary["id"] == group.ID {
+			name, _ := res.Attrs["name"].(string)
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func (p *Pack) clearProjectDefault(zone, project string) {
+	for _, res := range p.env.Store.List(kindSecurityGroup, resource.Tenant{Provider: Name, Project: project, Zone: zone}) {
+		if isProjectDefault(res) {
+			res.Attrs["project_default"] = false
+			res.Attrs["organization_default"] = false
+			p.env.Store.Put(res)
+		}
+	}
+}
+
+// securityGroupOf resolves the {id} segment, writing the error itself. It is
+// what keeps every handler above a single early return.
+func (p *Pack) securityGroupOf(w http.ResponseWriter, r *http.Request) (*resource.Resource, bool) {
+	zone, ok := zoneOf(w, r)
+	if !ok {
+		return nil, false
+	}
+	id := r.PathValue("id")
+	res, found := p.env.Store.Get(Name, kindSecurityGroup, id)
+	if !found || res.Tenant.Zone != zone {
+		writeNotFound(w, "security_group", id)
+		return nil, false
+	}
+	return res, true
+}
+
+func (p *Pack) securityGroupRuleOf(w http.ResponseWriter, r *http.Request) (*resource.Resource, bool) {
+	group, ok := p.securityGroupOf(w, r)
+	if !ok {
+		return nil, false
+	}
+	id := r.PathValue("ruleID")
+	res, found := p.env.Store.Get(Name, kindSecurityGroupRule, id)
+	// A rule read through the wrong group is not found, not someone else's rule.
+	if !found || res.Runtime[runtimeGroupKey] != group.ID {
+		writeNotFound(w, "security_group_rule", id)
+		return nil, false
+	}
+	return res, true
+}
+
+func (p *Pack) securityGroupView(res *resource.Resource) map[string]any {
+	out := make(map[string]any, len(res.Attrs)+6)
+	for k, v := range res.Attrs {
+		out[k] = v
+	}
+	out["id"] = res.ID
+	out["zone"] = res.Tenant.Zone
+	out["state"] = res.State
+	out["creation_date"] = res.Created.Format(time.RFC3339)
+	out["modification_date"] = res.Updated.Format(time.RFC3339)
+	// servers is computed rather than stored: a server attached after the group
+	// was created would otherwise never show up here.
+	servers := make([]any, 0)
+	for _, name := range p.serversUsing(res) {
+		servers = append(servers, map[string]any{"name": name})
+	}
+	out["servers"] = servers
+	return out
+}
+
+func ruleView(res *resource.Resource) map[string]any {
+	out := make(map[string]any, len(res.Attrs)+2)
+	for k, v := range res.Attrs {
+		out[k] = v
+	}
+	out["id"] = res.ID
+	out["zone"] = res.Tenant.Zone
+	return out
+}
+
+func summaryOf(res *resource.Resource) map[string]any {
+	return map[string]any{"id": res.ID, "name": res.Attrs["name"]}
+}
+
+func isProjectDefault(res *resource.Resource) bool {
+	def, _ := res.Attrs["project_default"].(bool)
+	return def
+}
+
+// nextPosition is the position a rule receives when it follows count others.
+// Positions are 1-based, and the cap keeps the conversion from wrapping whatever
+// a caller passes.
+func nextPosition(count int) uint32 {
+	const maxPosition = 1 << 20
+	if count < 0 {
+		return 1
+	}
+	if count+1 > maxPosition {
+		return maxPosition
+	}
+	return uint32(count + 1) //nolint:gosec // bounded by maxPosition above
+}
+
+func positionOf(res *resource.Resource) uint32 {
+	switch v := res.Attrs["position"].(type) {
+	case uint32:
+		return v
+	// A restored snapshot comes back through JSON, where every number is a
+	// float64. Without this case the order is lost on restart.
+	case float64:
+		return uint32(v)
+	default:
+		return 0
+	}
+}
+
+// portOrNil maps an unset or zero port onto null, which is what the API returns
+// for a rule that covers every port.
+func portOrNil(port *uint32) any {
+	if port == nil || *port == 0 {
+		return nil
+	}
+	return *port
+}
+
+func policyOrDefault(w http.ResponseWriter, field, value string) (string, bool) {
+	if value == "" {
+		return policyAccept, true
+	}
+	if !validPolicies[value] {
+		writePolicyError(w, field, value)
+		return "", false
+	}
+	return value, true
+}
+
+func writePolicyError(w http.ResponseWriter, field, value string) {
+	writeInvalidArguments(w, ArgumentError{
+		ArgumentName: field,
+		Reason:       "constraint",
+		HelpMessage:  "must be " + policyAccept + " or " + policyDrop + ", got " + value,
+	})
+}
+
+func writeEnumError(w http.ResponseWriter, field, value string) {
+	writeInvalidArguments(w, ArgumentError{
+		ArgumentName: field,
+		Reason:       "constraint",
+		HelpMessage:  "unsupported value " + value,
+	})
+}

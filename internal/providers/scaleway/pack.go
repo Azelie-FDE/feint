@@ -1,0 +1,329 @@
+// Package scaleway emulates the Scaleway API.
+//
+// Scope of this pack: the Instance product (servers), served on the real paths
+// (/instance/v1/zones/{zone}/servers). Authentication is accepted and ignored:
+// the X-Auth-Token header is never validated, exactly like the other local cloud
+// emulators, because the point is to run without an account.
+//
+// Everything the pack serves is declared in Routes with its upstream operation
+// name, and everything it deliberately does not serve is declared in Declined.
+// The drift report subtracts both from the SDK surface, so anything new upstream
+// shows up as unknown and fails CI instead of rotting silently.
+package scaleway
+
+import (
+	"net/http"
+	"sync"
+
+	"github.com/stephrobert/feint/internal/core/emulator"
+)
+
+// Name is the provider key used by the store and the coverage report.
+const Name = "scaleway"
+
+// Pack implements emulator.Pack for Scaleway.
+type Pack struct {
+	env *emulator.Env
+	// defaults serializes the lazy provisioning of per-project inventory (the
+	// default security group). The store has no compare-and-set, so without it
+	// two concurrent first reads of a zone each create one.
+	defaults sync.Mutex
+	// addresses serializes address allocation, which is read-modify-write over
+	// the store: an allocator is rebuilt from what exists, hands out an address,
+	// and the result is persisted. Two requests interleaving there receive the
+	// same address, and Terraform creates ten resources at a time by default.
+	//
+	// One lock for every block rather than one per network: allocation is a
+	// handful of map operations, the contention is imperceptible, and a lock per
+	// resource would have to be created, found and eventually collected.
+	addresses sync.Mutex
+}
+
+// New returns a Scaleway pack backed by env.
+func New(env *emulator.Env) *Pack { return &Pack{env: env} }
+
+// Name implements emulator.Pack.
+func (p *Pack) Name() string { return Name }
+
+// Routes implements emulator.Pack.
+func (p *Pack) Routes() []emulator.Route {
+	const zones = "/instance/v1/zones/{zone}"
+	// The VPC product is regional, not zonal, and it is a different API root.
+	const regions = "/vpc/v2/regions/{region}"
+	const ipamRegions = "/ipam/v1/regions/{region}"
+	return []emulator.Route{
+		{Method: "GET", Path: zones + "/servers", Operation: "instance/v1/API.ListServers", Handler: p.listServers},
+		{Method: "POST", Path: zones + "/servers", Operation: "instance/v1/API.CreateServer", Handler: p.createServer},
+		{Method: "GET", Path: zones + "/servers/{id}", Operation: "instance/v1/API.GetServer", Handler: p.getServer},
+		{Method: "PATCH", Path: zones + "/servers/{id}", Operation: "instance/v1/API.UpdateServer", Handler: p.updateServer},
+		{Method: "DELETE", Path: zones + "/servers/{id}", Operation: "instance/v1/API.DeleteServer", Handler: p.deleteServer},
+		{Method: "POST", Path: zones + "/servers/{id}/action", Operation: "instance/v1/API.ServerAction", Handler: p.serverAction},
+
+		// Flexible IPs: the CLI allocates one before it creates a server, so the
+		// server path is not usable end to end without them.
+		{Method: "GET", Path: zones + "/ips", Operation: "instance/v1/API.ListIPs", Handler: p.listIPs},
+		{Method: "POST", Path: zones + "/ips", Operation: "instance/v1/API.CreateIP", Handler: p.createIP},
+		{Method: "GET", Path: zones + "/ips/{id}", Operation: "instance/v1/API.GetIP", Handler: p.getIP},
+		{Method: "PATCH", Path: zones + "/ips/{id}", Operation: "instance/v1/API.UpdateIP", Handler: p.updateIP},
+		{Method: "DELETE", Path: zones + "/ips/{id}", Operation: "instance/v1/API.DeleteIP", Handler: p.deleteIP},
+
+		// Security groups and their rules. The whole product is served and none
+		// of it is enforced: see securitygroups.go and docs/limits.md.
+		{Method: "GET", Path: zones + "/security_groups", Operation: "instance/v1/API.ListSecurityGroups", Handler: p.listSecurityGroups},
+		{Method: "POST", Path: zones + "/security_groups", Operation: "instance/v1/API.CreateSecurityGroup", Handler: p.createSecurityGroup},
+		{Method: "GET", Path: zones + "/security_groups/{id}", Operation: "instance/v1/API.GetSecurityGroup", Handler: p.getSecurityGroup},
+		{Method: "PATCH", Path: zones + "/security_groups/{id}", Operation: "instance/v1/API.UpdateSecurityGroup", Handler: p.updateSecurityGroup},
+		{Method: "DELETE", Path: zones + "/security_groups/{id}", Operation: "instance/v1/API.DeleteSecurityGroup", Handler: p.deleteSecurityGroup},
+		{Method: "GET", Path: zones + "/security_groups/{id}/rules", Operation: "instance/v1/API.ListSecurityGroupRules", Handler: p.listSecurityGroupRules},
+		{Method: "POST", Path: zones + "/security_groups/{id}/rules", Operation: "instance/v1/API.CreateSecurityGroupRule", Handler: p.createSecurityGroupRule},
+		{Method: "PUT", Path: zones + "/security_groups/{id}/rules", Operation: "instance/v1/API.SetSecurityGroupRules", Handler: p.setSecurityGroupRules},
+		{Method: "GET", Path: zones + "/security_groups/{id}/rules/{ruleID}", Operation: "instance/v1/API.GetSecurityGroupRule", Handler: p.getSecurityGroupRule},
+		{Method: "PATCH", Path: zones + "/security_groups/{id}/rules/{ruleID}", Operation: "instance/v1/API.UpdateSecurityGroupRule", Handler: p.updateSecurityGroupRule},
+		{Method: "DELETE", Path: zones + "/security_groups/{id}/rules/{ruleID}", Operation: "instance/v1/API.DeleteSecurityGroupRule", Handler: p.deleteSecurityGroupRule},
+
+		// Private NICs: where the addressing plan becomes a real interface. The
+		// address comes from the Private Network's own block, and the machine
+		// driver puts the machine on the backing bridge carrying it.
+		{Method: "GET", Path: zones + "/servers/{id}/private_nics", Operation: "instance/v1/API.ListPrivateNICs", Handler: p.listPrivateNICs},
+		{Method: "POST", Path: zones + "/servers/{id}/private_nics", Operation: "instance/v1/API.CreatePrivateNIC", Handler: p.createPrivateNIC},
+		{Method: "GET", Path: zones + "/servers/{id}/private_nics/{nicID}", Operation: "instance/v1/API.GetPrivateNIC", Handler: p.getPrivateNIC},
+		{Method: "DELETE", Path: zones + "/servers/{id}/private_nics/{nicID}", Operation: "instance/v1/API.DeletePrivateNIC", Handler: p.deletePrivateNIC},
+
+		// IPAM. Not a convenience: instance/v1.PrivateNIC carries no address, only
+		// ipam_ip_ids, so this is the only way a client learns the address of a
+		// NIC. Serving the NIC without it is serving half a product.
+		{Method: "GET", Path: ipamRegions + "/ips", Operation: "ipam/v1/API.ListIPs", Handler: p.listIPAMIPs},
+		{Method: "GET", Path: ipamRegions + "/ips/{ipID}", Operation: "ipam/v1/API.GetIP", Handler: p.getIPAMIP},
+
+		// User data: how a boot script reaches a server. The value is a raw body
+		// both ways, never a JSON envelope, and "cloud-init" is the key the
+		// machine driver feeds to the machine it starts.
+		{Method: "GET", Path: zones + "/servers/{id}/user_data", Operation: "instance/v1/API.ListServerUserData", Handler: p.listServerUserData},
+		{Method: "GET", Path: zones + "/servers/{id}/user_data/{key}", Operation: "instance/v1/API.GetServerUserData", Handler: p.getServerUserData},
+		{Method: "PATCH", Path: zones + "/servers/{id}/user_data/{key}", Operation: "instance/v1/API.SetServerUserData", Handler: p.setServerUserData},
+		{Method: "DELETE", Path: zones + "/servers/{id}/user_data/{key}", Operation: "instance/v1/API.DeleteServerUserData", Handler: p.deleteServerUserData},
+
+		// Volumes. A server always owns its root volume, and the Terraform
+		// provider reads it back by ID right after the create: without these
+		// routes the apply fails on "failed to read instance volume".
+		{Method: "GET", Path: zones + "/volumes", Operation: "instance/v1/API.ListVolumes", Handler: p.listVolumes},
+		{Method: "POST", Path: zones + "/volumes", Operation: "instance/v1/API.CreateVolume", Handler: p.createVolume},
+		{Method: "GET", Path: zones + "/volumes/{id}", Operation: "instance/v1/API.GetVolume", Handler: p.getVolume},
+		{Method: "PATCH", Path: zones + "/volumes/{id}", Operation: "instance/v1/API.UpdateVolume", Handler: p.updateVolume},
+		{Method: "DELETE", Path: zones + "/volumes/{id}", Operation: "instance/v1/API.DeleteVolume", Handler: p.deleteVolume},
+
+		// VPCs and Private Networks. This is what turns a declared block into a
+		// real bridge: the subnet is validated, checked against its siblings for
+		// overlap, and handed to the machine driver.
+		{Method: "GET", Path: regions + "/vpcs", Operation: "vpc/v2/API.ListVPCs", Handler: p.listVPCs},
+		{Method: "POST", Path: regions + "/vpcs", Operation: "vpc/v2/API.CreateVPC", Handler: p.createVPC},
+		{Method: "GET", Path: regions + "/vpcs/{vpc_id}", Operation: "vpc/v2/API.GetVPC", Handler: p.getVPC},
+		{Method: "PATCH", Path: regions + "/vpcs/{vpc_id}", Operation: "vpc/v2/API.UpdateVPC", Handler: p.updateVPC},
+		{Method: "DELETE", Path: regions + "/vpcs/{vpc_id}", Operation: "vpc/v2/API.DeleteVPC", Handler: p.deleteVPC},
+		{Method: "GET", Path: regions + "/private-networks", Operation: "vpc/v2/API.ListPrivateNetworks", Handler: p.listPrivateNetworks},
+		{Method: "POST", Path: regions + "/private-networks", Operation: "vpc/v2/API.CreatePrivateNetwork", Handler: p.createPrivateNetwork},
+		{Method: "GET", Path: regions + "/private-networks/{pnID}", Operation: "vpc/v2/API.GetPrivateNetwork", Handler: p.getPrivateNetwork},
+		{Method: "PATCH", Path: regions + "/private-networks/{pnID}", Operation: "vpc/v2/API.UpdatePrivateNetwork", Handler: p.updatePrivateNetwork},
+		{Method: "DELETE", Path: regions + "/private-networks/{pnID}", Operation: "vpc/v2/API.DeletePrivateNetwork", Handler: p.deletePrivateNetwork},
+
+		// The catalogue: not inventory the emulator owns, but the CLI reads it
+		// before it creates anything and gives up on a 404.
+		{Method: "GET", Path: zones + "/products/servers", Operation: "instance/v1/API.ListServersTypes", Handler: p.listServerTypes},
+		{Method: "GET", Path: zones + "/images/{id}", Operation: "instance/v1/API.GetImage", Handler: p.getImage},
+		{Method: "GET", Path: "/marketplace/v2/local-images", Operation: "marketplace/v2/API.ListLocalImages", Handler: p.listLocalImages},
+
+		// IAM SSH keys. Scaleway attaches keys to the project, not to the server,
+		// so every key of the project is injected into every machine it boots.
+		// Without this product a server can run but nobody can log into it.
+		{Method: "GET", Path: "/iam/v1alpha1/ssh-keys", Operation: "iam/v1alpha1/API.ListSSHKeys", Handler: p.listSSHKeys},
+		{Method: "POST", Path: "/iam/v1alpha1/ssh-keys", Operation: "iam/v1alpha1/API.CreateSSHKey", Handler: p.createSSHKey},
+		{Method: "GET", Path: "/iam/v1alpha1/ssh-keys/{id}", Operation: "iam/v1alpha1/API.GetSSHKey", Handler: p.getSSHKey},
+		{Method: "PATCH", Path: "/iam/v1alpha1/ssh-keys/{id}", Operation: "iam/v1alpha1/API.UpdateSSHKey", Handler: p.updateSSHKey},
+		{Method: "DELETE", Path: "/iam/v1alpha1/ssh-keys/{id}", Operation: "iam/v1alpha1/API.DeleteSSHKey", Handler: p.deleteSSHKey},
+	}
+}
+
+// productPrefixes is Scaleway's URL space as this pack serves it: one prefix per
+// product and version, since Scaleway mounts each product under its own root.
+//
+// Kept beside the routes rather than derived from them, because deriving would
+// mean guessing how many leading segments make a product. It cannot drift
+// silently: TestEveryRouteFallsUnderADeclaredPrefix fails on a route that
+// escapes the list, which is what would otherwise leave a whole product
+// answering net/http's plain text.
+var productPrefixes = []string{
+	"/instance/v1/",
+	"/vpc/v2/",
+	"/ipam/v1/",
+	"/iam/v1alpha1/",
+	"/marketplace/v2/",
+}
+
+// Prefixes implements emulator.Unrouted.
+func (p *Pack) Prefixes() []string { return productPrefixes }
+
+// NotFound implements emulator.Unrouted.
+func (p *Pack) NotFound(w http.ResponseWriter, r *http.Request) {
+	writeNotEmulated(w, r.URL.Path)
+}
+
+// Declined implements emulator.Pack.
+//
+// These operations exist upstream and will not be emulated as they are. Every
+// group says why, because "out of scope" and "not triaged yet" are different
+// answers and only the first belongs here. What stays unknown in the coverage
+// report is work this project intends to do, which is what makes that report
+// a list somebody can act on rather than a number nobody reads.
+func (p *Pack) Declined() []string {
+	return []string{
+		// Scaleway's own inventory: the dashboard, the product catalogue, the
+		// quotas. A local emulator has none of it and cannot invent it without
+		// telling a client something false about capacity.
+		"instance/v1/API.GetDashboard",
+		"instance/v1/API.GetServerTypesAvailability",
+		"instance/v1/API.GetServerCompatibleTypes",
+		"instance/v1/API.ListVolumesTypes",
+		"instance/v1/API.CheckBlockMigrationOrganizationQuotas",
+
+		// The rule set Scaleway seeds a new security group with is a value, and
+		// the SDK carries shapes. Serving an invented list would tell a client
+		// which ports are open on a runtime that filters nothing. Trade it for
+		// real values the day someone measures them against the real API.
+		"instance/v1/API.ListDefaultSecurityGroupRules",
+
+		// Migrating a legacy local volume, or a snapshot of one, to Scaleway
+		// Block Storage. Every volume served here is already of the current
+		// kind, so a plan would list nothing and applying it would confirm a
+		// move that never happened.
+		"instance/v1/API.PlanBlockMigration",
+		"instance/v1/API.ApplyBlockMigration",
+
+		// Writes a snapshot into an Object Storage bucket, and Object Storage
+		// is not emulated: the Terraform provider builds the S3 endpoint from
+		// the region in code, so pointing it here would take DNS interception
+		// and a certificate it accepts. The measurement is in docs/limits.md.
+		"instance/v1/API.ExportSnapshot",
+
+		// The metadata service answers on the link-local address
+		// 169.254.42.42, from inside the machine, to a caller that carries no
+		// credentials. It is not the same surface as the rest of instance/v1
+		// and serving it would mean an HTTP listener inside every emulated
+		// machine. User data reaches the guest through the runtime instead,
+		// which is what cloud-init reads.
+		"instance/v1/MetadataAPI.GetMetadata",
+		"instance/v1/MetadataAPI.GetUserData",
+		"instance/v1/MetadataAPI.ListUserData",
+		"instance/v1/MetadataAPI.SetUserData",
+		"instance/v1/MetadataAPI.DeleteUserData",
+
+		// ipam/v1alpha1 is the superseded draft of ipam/v1, which is served.
+		"ipam/v1alpha1/API.ListIPs",
+
+		// instance/v2alpha1 is an alpha rewrite of the whole instance API, and
+		// it duplicates surface that v1 already serves. No client reaches for
+		// it: the conformance suite drives scw and Terraform end to end and
+		// every request lands on v1. Emulating both would double the work and
+		// pin down shapes Scaleway is still free to change.
+		//
+		// Listed one by one on purpose. A prefix rule would swallow whatever
+		// upstream adds here, and the point of this file is that additions are
+		// seen. When the surface stabilises into an instance/v2, the scan
+		// reports it as new and this decision gets taken again.
+		"instance/v2alpha1/API.AddSecurityGroupRules",
+		"instance/v2alpha1/API.AttachServerFileSystem",
+		"instance/v2alpha1/API.AttachServerIP",
+		"instance/v2alpha1/API.AttachServerPrivateNetworkInterface",
+		"instance/v2alpha1/API.AttachServerVolume",
+		"instance/v2alpha1/API.CheckTemplate",
+		"instance/v2alpha1/API.CreatePlacementGroup",
+		"instance/v2alpha1/API.CreatePrivateNetworkInterface",
+		"instance/v2alpha1/API.CreateSecurityGroup",
+		"instance/v2alpha1/API.CreateServer",
+		"instance/v2alpha1/API.CreateServerFromTemplate",
+		"instance/v2alpha1/API.CreateTemplate",
+		"instance/v2alpha1/API.DeletePlacementGroup",
+		"instance/v2alpha1/API.DeletePrivateNetworkInterface",
+		"instance/v2alpha1/API.DeleteSecurityGroup",
+		"instance/v2alpha1/API.DeleteSecurityGroupRules",
+		"instance/v2alpha1/API.DeleteServer",
+		"instance/v2alpha1/API.DeleteTemplate",
+		"instance/v2alpha1/API.DeleteTemplateUserData",
+		"instance/v2alpha1/API.DeleteUserData",
+		"instance/v2alpha1/API.DetachServerFileSystem",
+		"instance/v2alpha1/API.DetachServerIP",
+		"instance/v2alpha1/API.DetachServerPrivateNetworkInterface",
+		"instance/v2alpha1/API.DetachServerVolume",
+		"instance/v2alpha1/API.GetPlacementGroup",
+		"instance/v2alpha1/API.GetPrivateNetworkInterface",
+		"instance/v2alpha1/API.GetResourceCounts",
+		"instance/v2alpha1/API.GetSecurityGroup",
+		"instance/v2alpha1/API.GetServer",
+		"instance/v2alpha1/API.GetServerCloudInit",
+		"instance/v2alpha1/API.GetTemplate",
+		"instance/v2alpha1/API.GetTemplateCloudInit",
+		"instance/v2alpha1/API.GetTemplateUserData",
+		"instance/v2alpha1/API.GetUserData",
+		"instance/v2alpha1/API.ListPlacementGroups",
+		"instance/v2alpha1/API.ListPrivateNetworkInterfaces",
+		"instance/v2alpha1/API.ListSecurityGroups",
+		"instance/v2alpha1/API.ListServerTypes",
+		"instance/v2alpha1/API.ListServers",
+		"instance/v2alpha1/API.ListTemplateUserDataKeys",
+		"instance/v2alpha1/API.ListTemplates",
+		"instance/v2alpha1/API.ListUserDataKeys",
+		"instance/v2alpha1/API.PauseServer",
+		"instance/v2alpha1/API.RebootServer",
+		"instance/v2alpha1/API.SetSecurityGroupRules",
+		"instance/v2alpha1/API.SetServerCloudInit",
+		"instance/v2alpha1/API.SetServerDefaultIP",
+		"instance/v2alpha1/API.SetTemplateCloudInit",
+		"instance/v2alpha1/API.SetTemplateUserData",
+		"instance/v2alpha1/API.SetUserData",
+		"instance/v2alpha1/API.StartServer",
+		"instance/v2alpha1/API.StopAndDeleteServer",
+		"instance/v2alpha1/API.StopServer",
+		"instance/v2alpha1/API.UpdatePlacementGroup",
+		"instance/v2alpha1/API.UpdatePrivateNetworkInterface",
+		"instance/v2alpha1/API.UpdateSecurityGroup",
+		"instance/v2alpha1/API.UpdateSecurityGroupRule",
+		"instance/v2alpha1/API.UpdateServer",
+		"instance/v2alpha1/API.UpdateTemplate",
+	}
+}
+
+// The zone and region a client defaults to when it is given none. They are the
+// ones every conformance fixture uses, so an example copied from the README and
+// an example copied from the suite address the same account.
+const (
+	defaultEnvZone   = "fr-par-1"
+	defaultEnvRegion = "fr-par"
+)
+
+// Env implements emulator.Pack.
+//
+// The values are the ones tools/conformance/scaleway/fake-credentials.env
+// carries, deliberately and not by coincidence: the CLI and the conformance
+// suite must not be able to drift apart, and the constraints they encode are
+// real. The access key has to match SCW[A-Z0-9]{17} and the secret key has to be
+// a UUID — the client validates their *shape* before it signs anything, though
+// the emulator checks neither.
+//
+// The project and the organization are different UUIDs on purpose. They are
+// different things on a real account — infrastructure belongs to a project, IAM
+// and billing to the organization above it — and using one value for both makes
+// a suite pass over a confusion instead of catching it.
+func (p *Pack) Env(endpoint string) emulator.Environment {
+	return emulator.Environment{
+		Vars: map[string]string{
+			"SCW_API_URL":                 endpoint,
+			"SCW_ACCESS_KEY":              "SCWXXXXXXXXXXXXXXXXX",
+			"SCW_SECRET_KEY":              "11111111-1111-1111-1111-111111111111",
+			"SCW_DEFAULT_PROJECT_ID":      "11111111-1111-1111-1111-111111111111",
+			"SCW_DEFAULT_ORGANIZATION_ID": "99999999-9999-4999-8999-999999999999",
+			"SCW_DEFAULT_ZONE":            defaultEnvZone,
+			"SCW_DEFAULT_REGION":          defaultEnvRegion,
+			"SCW_INSECURE":                "true",
+		},
+		Note: "Terraform needs api_url in the provider block; the CLI needs nothing else.",
+	}
+}
