@@ -1,27 +1,43 @@
 {
-  "declined": 74,
-  "implemented": 49,
+  "declined": 231,
+  "implemented": 57,
   "orphans": null,
   "products": [
     {
+      "product": "iam",
+      "total": 83,
+      "implemented": 5,
+      "declined": 78,
+      "unknown": 0,
+      "versions": [
+        {
+          "version": "v1alpha1",
+          "total": 83,
+          "implemented": 5,
+          "declined": 78,
+          "unknown": 0
+        }
+      ]
+    },
+    {
       "product": "instance",
-      "total": 137,
-      "implemented": 37,
-      "declined": 73,
-      "unknown": 27,
+      "total": 150,
+      "implemented": 39,
+      "declined": 111,
+      "unknown": 0,
       "versions": [
         {
           "version": "v1",
           "total": 78,
-          "implemented": 37,
-          "declined": 14,
-          "unknown": 27
+          "implemented": 39,
+          "declined": 39,
+          "unknown": 0
         },
         {
           "version": "v2alpha1",
-          "total": 59,
+          "total": 72,
           "implemented": 0,
-          "declined": 59,
+          "declined": 72,
           "unknown": 0
         }
       ]
@@ -30,15 +46,15 @@
       "product": "ipam",
       "total": 10,
       "implemented": 2,
-      "declined": 1,
-      "unknown": 7,
+      "declined": 8,
+      "unknown": 0,
       "versions": [
         {
           "version": "v1",
           "total": 9,
           "implemented": 2,
-          "declined": 0,
-          "unknown": 7
+          "declined": 7,
+          "unknown": 0
         },
         {
           "version": "v1alpha1",
@@ -50,23 +66,39 @@
       ]
     },
     {
-      "product": "vpc",
-      "total": 32,
-      "implemented": 10,
-      "declined": 0,
-      "unknown": 22,
+      "product": "marketplace",
+      "total": 8,
+      "implemented": 1,
+      "declined": 7,
+      "unknown": 0,
       "versions": [
         {
           "version": "v2",
-          "total": 32,
+          "total": 8,
+          "implemented": 1,
+          "declined": 7,
+          "unknown": 0
+        }
+      ]
+    },
+    {
+      "product": "vpc",
+      "total": 37,
+      "implemented": 10,
+      "declined": 27,
+      "unknown": 0,
+      "versions": [
+        {
+          "version": "v2",
+          "total": 37,
           "implemented": 10,
-          "declined": 0,
-          "unknown": 22
+          "declined": 27,
+          "unknown": 0
         }
       ]
     }
   ],
   "provider": "scaleway",
-  "total": 179,
-  "unknown": 56
+  "total": 288,
+  "unknown": 0
 }

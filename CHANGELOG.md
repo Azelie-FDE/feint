@@ -11,6 +11,99 @@ Two kinds of change deserve their own line whatever their size, because they are
 what this project is judged on: **a response shape a client can observe**, and
 **a limit that moved**. A refactor that changes neither belongs in `git log`.
 
+## [0.3.0]
+
+### Changed
+
+- **`Declined()` carries a reason for every refusal**, and the coverage report
+  prints it. A refusal used to be a bare operation name whose justification lived
+  in a comment only a reader of the code ever saw, which made "not triaged yet"
+  and "out of scope" indistinguishable from the outside. They are different
+  answers and only one is a refusal. Breaking for anyone implementing
+  `emulator.Pack`: `Declined() []string` becomes `Declined() []Decline`.
+- **A refusal without a usable reason stops the server**, rather than being
+  reported later. Empty strings, `TODO`, `n/a`, a reason under five words, and a
+  reason that is only the operation name restated are all refused at start-up
+  with exit code 1. The gate exists to make untriaged surface visible; a
+  placeholder reason is how it stops working.
+
+### Added
+
+- **The upstream surface of all three providers is triaged.** Exoscale goes from
+  358 operations nobody had decided on to 110, Outscale from 199 to 96, and
+  Scaleway's `iam` and `marketplace` come under the drift gate — served and
+  unmeasured is the least defensible state a route can be in. Each refusal is
+  written by name, grouped by family, with the measurement that justifies it: the
+  emulator authenticates nothing, so IAM is refused; `ReadQuotas` is read only by
+  data sources, so refusing it breaks no `apply`.
+
+### Fixed
+
+Defects found by auditing whole packs rather than diffs, all of them on paths no
+conformance client walks:
+
+- **Detaching an IP did nothing** (Scaleway). `PATCH /ips/{id}` with
+  `{"server": null}` was indistinguishable from a request that did not mention
+  the field, so the address stayed attached while the API answered success.
+- **A server's volumes could not be attached or detached** (Scaleway), and a
+  deleted or terminated server did not release its addresses.
+- **Two concurrent creates could receive the same address** (Outscale). Twelve
+  parallel creates handed one address to two machines; with a runtime, that is
+  two containers configured with the same static IP.
+- **A Subnet deleted under the machines placed in it** (Outscale), and with a
+  runtime it tore down the backing network under attached machines.
+- **A create that failed left machines running** (Outscale): fourteen machines
+  asked for in a subnet holding eleven answered an error and kept the eleven,
+  which no client tracks.
+- **`DryRun` was declared on twenty actions and read by none.** `CreateSubnet
+  --dry-run` created a bridge on the operator's host and `DeleteVms --dry-run`
+  destroyed the machine. It is now answered at the mount point, before any
+  handler runs.
+- **A keypair accepted anything**, including a multi-line value that cloud-init
+  refuses later — the machine booted holding the wrong bytes and refused every
+  login.
+- **`terraform destroy` failed for good on a server with `additional_volume_ids`**
+  (Scaleway). Terminate did not detach its volumes, so the disk went on naming a
+  server that answered 404 and every retry hit "volume is still attached". The
+  provider walks terminate, not delete, and only delete released anything.
+- **Three doors attached a volume and one asked whether it was free** (Scaleway):
+  a create or an update naming another server's root volume moved it, and both
+  servers then listed it.
+- **Creating a server took an address off a live machine** without withdrawing
+  it, so under a runtime two machines claimed the same address.
+- **`scw instance ip delete <address>`** answered success and kept the address.
+- **`precondition failed:` printed with nothing after the colon**: the token the
+  pack emitted was not one of the three the SDK renders.
+- **`scw instance volume list name=vol`** came back empty against a volume called
+  `myvolume`: the SDK documents that filter as a substring, with that example.
+
+### Added
+
+- **`TestEveryCitedTestExists`** walks every comment in the repository and fails
+  when it cites a test that does not exist. Three audits in a row found a fix
+  whose comment named the test that would fail without it, when that test had
+  never been written — including in the commit that invoked the rule while
+  breaking it. A rule written down three times and broken three times needed a
+  check rather than a fourth restatement.
+- **The Scaleway upstream surface is fully triaged**: 0 operations left
+  undecided across instance, vpc, ipam, iam and marketplace.
+- **The conformance fixture walks volumes and addresses**: attach, refuse the
+  delete under a server, detach, delete; then resolve and delete an IP by its
+  address; and a Terraform apply/destroy over `additional_volume_ids`. Every
+  defect the audits found lived in the gap between that fixture and what the
+  pack claimed. 68 of 91 routes are now proven by a real client, up from 64.
+
+### Limits that moved
+
+- `DryRun` is honoured on every served Outscale action, but it does **not**
+  validate: the answer is issued before the handler runs, so a dry run of a
+  malformed request still answers 200.
+- `MaxVmsCount` is capped per create; unbounded, one request allocated a million
+  resources and tried to start a million containers inside the handler.
+- `SecurityGroupIds` is refused rather than silently dropped: telling a client
+  its rules were applied when no rule exists anywhere is the one answer worse
+  than a 400.
+
 ## [0.2.0]
 
 ### Added

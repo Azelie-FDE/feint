@@ -689,12 +689,36 @@ func (p *Pack) resourceOf(w http.ResponseWriter, r *http.Request, kind, segment,
 	return res, true
 }
 
+// writePrecondition answers the shape scw/errors.go actually decodes.
+//
+// It used to send {message, resource, resource_id}, and the SDK reads
+// {precondition, help_message}: every precondition error reached the client with
+// its reason stripped — `scaleway-sdk-go: precondition failed: ` with nothing
+// after the colon. An audit reproduced it twice, on a duplicate NIC and on
+// deleting a default security group. errors.go says the field names mirror the
+// SDK structs; for this family they did not.
+//
+// TestAPreconditionRendersAsASentence fails without this.
 func writePrecondition(w http.ResponseWriter, kind, id, message string) {
-	emulator.WriteJSON(w, http.StatusBadRequest, APIError{
-		Type:       "precondition_failed",
-		Message:    message,
-		Resource:   kind,
-		ResourceID: id,
+	// The SDK's Precondition field is a short machine-readable token, and
+	// PreconditionFailedError.Error() switches on exactly three of them:
+	// unknown_precondition, resource_still_in_use, attribute_must_be_set. A
+	// token outside that set renders as the empty string, so `scw instance
+	// security-group delete <default>` printed "precondition failed: " with
+	// nothing after the colon — an audit reproduced it against the first
+	// version of this function, which built "<kind>_resource_still_in_use".
+	// The kind is carried by the resource field instead, which is where the
+	// HTTP API puts it.
+	//
+	// TestAPreconditionRendersAsASentence fails without this.
+	emulator.WriteJSON(w, http.StatusBadRequest, map[string]any{
+		"type":         "precondition_failed",
+		"precondition": "resource_still_in_use",
+		"help_message": message,
+		// Kept beside the SDK fields rather than instead of them: the HTTP API
+		// carries them and a client reading the raw body still finds them.
+		"resource":    kind,
+		"resource_id": id,
 	})
 }
 

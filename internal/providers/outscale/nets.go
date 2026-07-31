@@ -296,18 +296,49 @@ func (p *Pack) deleteSubnet(w http.ResponseWriter, r *http.Request) {
 		p.badRequest(w, err.Error())
 		return
 	}
-	res, found := p.env.Store.Get(Name, kindSubnet, req.SubnetID)
+	subnet, found := p.env.Store.Get(Name, kindSubnet, req.SubnetID)
 	if !found {
 		p.notFound(w, "Subnet", req.SubnetID)
 		return
 	}
 
-	p.removeBackingNetwork(r.Context(), res)
+	// A Subnet does not vanish under the machines placed in it. The Net path
+	// above has always refused while subnets remained, and this one checked
+	// nothing: an audit deleted a subnet under a running Vm, then its Net, and
+	// ReadVms went on naming both. With a runtime it tore down the backing
+	// network under attached machines — and the destructive paths are the ones
+	// this repository's own instructions say to guard first.
+	//
+	// Under the addressing lock, which is where allocateVms places a Vm: without
+	// it the guard reads an empty list while a create is between its placement
+	// and its Put, and the Subnet goes out under a machine that lands a
+	// microsecond later. The first version checked outside the lock, which made
+	// the guard true only when nothing else was running.
+	//
+	// TestASubnetDoesNotDeleteUnderAVm fails without the guard.
+	// TestASubnetDoesNotDeleteUnderARace holds the invariant under sixty racing
+	// rounds, and — measured, not assumed — it still passes when the lock is
+	// removed: the window between the List and the Delete is a few microseconds
+	// and nothing in the test can widen it. So the lock is argued from the
+	// allocation path, which does hold it, and the race test is a regression net,
+	// not the proof. Saying which is which is the point.
+	p.addresses.Lock()
+	for _, vm := range p.env.Store.List(kindVM, resource.Tenant{Provider: Name}) {
+		if stringOf(vm.Attrs["SubnetId"]) == req.SubnetID {
+			p.addresses.Unlock()
+			p.conflict(w, "the Subnet "+req.SubnetID+" still holds "+vm.ID)
+			return
+		}
+	}
+	// Removed from the store under the lock, so a create that wakes up next
+	// fails to resolve it rather than placing a Vm in a Subnet being deleted.
 	p.env.Store.Delete(Name, kindSubnet, req.SubnetID)
+	p.addresses.Unlock()
 
-	emulator.WriteJSON(w, http.StatusOK, map[string]any{
-		"ResponseContext": p.context(),
-	})
+	// The runtime call is slow and stays outside: the Subnet is already
+	// unreachable to every other handler by this point.
+	p.removeBackingNetwork(r.Context(), subnet)
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{"ResponseContext": p.context()})
 }
 
 // ---- Views and plumbing ------------------------------------------------------
@@ -333,8 +364,26 @@ func (p *Pack) subnetView(res *resource.Resource) map[string]any {
 	out["SubnetId"] = res.ID
 	out["State"] = res.State
 
+	// Computed from the mask *and* from what is allocated, which is what the
+	// comment on this view has always claimed and what it did not do: a fresh
+	// allocator was built and nothing reserved, so a /24 with three machines in
+	// it still answered 251. The conformance suite only ever read empty subnets,
+	// so it proved the mask half and the comment asserted the rest.
+	//
+	// A stored count would go stale the moment an address is taken; this one
+	// cannot, because it is derived on every read.
+	//
+	// TestAvailableIpsCountFollowsTheMachines fails without the reservation loop.
 	if prefix, err := prefixOf(res, "IpRange"); err == nil {
 		if allocator, err := network.NewAllocator(prefix, reservedPerSubnet); err == nil {
+			for _, vm := range p.env.Store.List(kindVM, resource.Tenant{Provider: Name}) {
+				if stringOf(vm.Attrs["SubnetId"]) != res.ID {
+					continue
+				}
+				if taken, parseErr := netip.ParseAddr(stringOf(vm.Attrs["PrivateIp"])); parseErr == nil {
+					_ = allocator.Reserve(taken)
+				}
+			}
 			out["AvailableIpsCount"] = allocator.Available()
 		}
 	}

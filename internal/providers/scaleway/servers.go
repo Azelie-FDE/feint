@@ -1,9 +1,11 @@
 package scaleway
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -178,7 +180,9 @@ func (p *Pack) rootVolume(server *resource.Resource, name, project, organization
 	// it, so honouring a local type here would make it refuse the very creation
 	// it just asked for. Stated rather than silently overridden.
 	vol := p.newVolume(server.Tenant.Zone, project, organization, volumeName, "b_ssd", size)
-	p.attachVolume(vol, server, name)
+	// A volume this call just built: it can belong to nobody else, so the only
+	// error attachVolume returns cannot happen here.
+	_ = p.attachVolume(vol, server, name)
 	// Built, not stored. Storing here put the volume in the store before the
 	// flexible IPs were validated, so a create refused with a 404 left an
 	// orphan disk attached to a server that never existed — the very defect the
@@ -279,7 +283,7 @@ func (p *Pack) createServer(w http.ResponseWriter, r *http.Request) {
 		"hostname":        req.Name,
 		"tags":            orEmpty(req.Tags),
 		"image":           p.imageView(zone, resolvedImageID, imageLabel),
-		"volumes":         map[string]any{"0": volumeView(rootVol)},
+		"volumes":         p.attachTemplateVolumes(req.Volumes, rootVol, res, zone, req.Name),
 		// Deprecated upstream, and "always null when routed_ip_enabled is True",
 		// which is this emulator's default. The address of a server on a private
 		// network is read through its NIC and ipam/v1, not here.
@@ -320,7 +324,29 @@ func (p *Pack) createServer(w http.ResponseWriter, r *http.Request) {
 	p.env.Store.Put(rootVol)
 	p.env.Store.Put(res)
 	for _, ip := range attach {
+		// Taken from whoever held it, the way updateIP does: it unroutes the
+		// previous machine before it routes the new one. This loop set the new
+		// owner and left the old machine carrying the address, so under a
+		// runtime two machines claimed the same /32 — and the first server lost
+		// its address with no error anywhere.
+		//
+		// TestCreatingAServerDoesNotStealALiveAddress fails without this.
+		// detachAddress reads the previous holder out of the record itself, so
+		// it has to run before the record is rewritten — the first version
+		// passed it the new server, which type-checks and reads no address at
+		// all, and the falsification caught it because the test kept passing
+		// with the call removed.
+		if previous, _ := ip.Attrs["server"].(map[string]any); previous != nil {
+			if id, _ := previous["id"].(string); id != "" && id != res.ID {
+				p.detachAddress(r.Context(), ip)
+			}
+		}
 		ip.Attrs["server"] = map[string]any{"id": res.ID, "name": req.Name}
+		// The state moves with the attachment. This path used to set the server
+		// and leave the state at "detached", so every address attached at create
+		// described itself as free while carrying a machine — updateIP has always
+		// set both, and an audit found the two paths disagreeing.
+		ip.State = "attached"
 		p.env.Store.Put(ip)
 		p.attachAddress(r.Context(), ip, res)
 	}
@@ -435,16 +461,33 @@ func (p *Pack) deleteServer(w http.ResponseWriter, r *http.Request) {
 	}
 	p.removeMachine(r.Context(), res)
 	p.env.Store.Delete(Name, kindServer, id)
-	// Volumes are detached, not deleted: deleting a server does not delete its
-	// disks on Scaleway, which is why `scw instance server delete` takes a
-	// with-volumes flag and then removes them itself. The CLI polls each volume
-	// after the server is gone, so one that vanished with it fails the delete
-	// with "waiting for volume failed: resource volume is not found".
+	p.releaseServerResources(r.Context(), id, zone)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// releaseServerResources gives back what a gone server held. Both doors to that
+// state call it — DELETE /servers/{id} and the terminate action — because an
+// audit found them disagreeing twice: first about addresses, then about
+// volumes, each time on the door the previous fix had not touched.
+//
+// Volumes are detached, not deleted: deleting a server does not delete its
+// disks on Scaleway, which is why `scw instance server delete` takes a
+// with-volumes flag and then removes them itself. The CLI polls each volume
+// after the server is gone, so one that vanished with it fails the delete with
+// "waiting for volume failed: resource volume is not found".
+//
+// Addresses go back to the pool. They used to keep naming the deleted server,
+// so `scw instance ip list` showed an address attached to something that no
+// longer existed — and with a runtime on, the route stayed on a machine that
+// had just been destroyed.
+//
+// TestTerminateReleasesWhatDeleteReleases fails without this.
+func (p *Pack) releaseServerResources(ctx context.Context, id, zone string) {
 	for _, vol := range p.volumesOf(id) {
 		p.detachVolume(vol)
 		p.env.Store.Put(vol)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	p.releaseAddressesOf(ctx, id, zone)
 }
 
 // serverAction drives the lifecycle. Transitions are immediate: a local emulator
@@ -525,6 +568,20 @@ func (p *Pack) serverAction(w http.ResponseWriter, r *http.Request) {
 	case "terminate":
 		p.removeMachine(r.Context(), res)
 		p.env.Store.Delete(Name, kindServer, id)
+		// One function for both doors, because writing the release twice is how
+		// they came to disagree: delete detached its volumes and terminate did
+		// not, so `tofu destroy` on a server with additional_volume_ids failed
+		// with "volume is still attached to a server" on every retry — the
+		// volume named a server that answered 404.
+		//
+		// Detached, not deleted, and that is upstream's own rule rather than a
+		// simplification: instance_sdk.go:4670 says terminate "will result in
+		// the deletion of l_ssd and scratch volumes types, sbs_volume volumes
+		// will only be detached". Every volume this pack attaches is b_ssd, so
+		// every one of them survives its server. A manual run of the whole
+		// lifecycle expected the root volume to vanish here and was wrong; the
+		// SDK is what settled it.
+		p.releaseServerResources(r.Context(), id, zone)
 		emulator.WriteJSON(w, http.StatusAccepted, map[string]any{"task": task(p.env.NewID(), "server_terminate", now)})
 		return
 	case "backup":
@@ -656,7 +713,8 @@ func (p *Pack) setServerVolumes(server *resource.Resource, wanted map[string]vol
 			if !found || vol.Tenant.Zone != server.Tenant.Zone {
 				return fmt.Errorf("volume %s does not exist in %s", tmpl.ID, server.Tenant.Zone)
 			}
-			p.attachVolume(vol, server, name)
+			// A volume this call just created: it can belong to nobody else.
+			_ = p.attachVolume(vol, server, name)
 			p.env.Store.Put(vol)
 			keep[vol.ID] = true
 			view[key] = volumeView(vol)
@@ -670,7 +728,8 @@ func (p *Pack) setServerVolumes(server *resource.Resource, wanted map[string]vol
 				volumeName = name + "-" + key
 			}
 			vol := p.newVolume(server.Tenant.Zone, project, organization, volumeName, orDefault(tmpl.VolumeType, "b_ssd"), uint64(tmpl.Size))
-			p.attachVolume(vol, server, name)
+			// A volume this call just created: it can belong to nobody else.
+			_ = p.attachVolume(vol, server, name)
 			p.env.Store.Put(vol)
 			keep[vol.ID] = true
 			view[key] = volumeView(vol)
@@ -792,4 +851,164 @@ func deref(p *bool, fallback bool) bool {
 		return fallback
 	}
 	return *p
+}
+
+// attachTemplateVolumes builds the server's volume map from what the client
+// asked for, not from the root volume alone.
+//
+// Only Volumes["0"] was ever read, so a create naming an existing volume under
+// "1" — which is exactly what the Terraform provider sends for
+// additional_volume_ids — answered 201 with the volume left detached and nothing
+// saying so. The unread-field report could not see it either: the field was
+// declared and read, just not to the end.
+//
+// A key naming a volume that does not exist is skipped rather than refused: the
+// real API errors, but refusing here would break a create over a volume the
+// emulator may simply not model yet, and the response says which volumes the
+// server actually has.
+//
+// TestAdditionalVolumesAreAttachedAtCreate fails without this.
+func (p *Pack) attachTemplateVolumes(templates map[string]volumeTemplate, root, server *resource.Resource, zone, serverName string) map[string]any {
+	out := map[string]any{"0": volumeView(root)}
+	for key, tpl := range templates {
+		if key == "0" || tpl.ID == "" {
+			continue
+		}
+		vol, ok := p.env.Store.Get(Name, kindVolume, tpl.ID)
+		if !ok || vol.Tenant.Zone != zone {
+			continue
+		}
+		// Skipped rather than refused, like an unknown id above: the answer says
+		// which volumes the server actually has, and a create must not take a
+		// disk from a running machine.
+		if err := p.attachVolume(vol, server, serverName); err != nil {
+			continue
+		}
+		p.env.Store.Put(vol)
+		out[key] = volumeView(vol)
+	}
+	return out
+}
+
+// attachServerVolume and detachServerVolume are what `scw instance server
+// terminate` walks before it terminates anything.
+//
+// Every emulated server owns a b_ssd root volume, so the CLI's terminate always
+// issues POST /servers/{id}/detach-volume first. That operation was untriaged,
+// answered 501, and the command failed outright on every server — an audit
+// reproduced it. The same pair also backs `scw instance server attach-volume`
+// and the Terraform provider's volume moves.
+//
+// TestTerminateWalksDetachVolume fails without them.
+func (p *Pack) attachServerVolume(w http.ResponseWriter, r *http.Request) {
+	zone, ok := zoneOf(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	unlock := p.binding().Serialise(id)
+	defer unlock()
+
+	res, found := p.env.Store.Get(Name, kindServer, id)
+	if !found || res.Tenant.Zone != zone {
+		writeNotFound(w, "server", id)
+		return
+	}
+	var req struct {
+		VolumeID string `json:"volume_id"`
+	}
+	if err := emulator.DecodeJSON(r, &req); err != nil {
+		writeInvalidArguments(w, ArgumentError{ArgumentName: "body", Reason: "format", HelpMessage: err.Error()})
+		return
+	}
+	vol, ok := p.env.Store.Get(Name, kindVolume, req.VolumeID)
+	if !ok || vol.Tenant.Zone != zone {
+		writeNotFound(w, "volume", req.VolumeID)
+		return
+	}
+	// The API refuses to move a volume already in use, and Terraform reads that
+	// error rather than guessing.
+	key := p.nextVolumeKey(res)
+	serverName, _ := res.Attrs["name"].(string)
+	if err := p.attachVolume(vol, res, serverName); err != nil {
+		writePrecondition(w, "volume", vol.ID, "the volume is attached to another server")
+		return
+	}
+	p.env.Store.Put(vol)
+
+	volumes := volumeMapOf(res)
+	volumes[key] = volumeView(vol)
+	res.Attrs["volumes"] = volumes
+	if !p.env.Store.Commit(res, p.env.Now()) {
+		writeNotFound(w, "server", id)
+		return
+	}
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{"server": p.view(res)})
+}
+
+func (p *Pack) detachServerVolume(w http.ResponseWriter, r *http.Request) {
+	zone, ok := zoneOf(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	unlock := p.binding().Serialise(id)
+	defer unlock()
+
+	res, found := p.env.Store.Get(Name, kindServer, id)
+	if !found || res.Tenant.Zone != zone {
+		writeNotFound(w, "server", id)
+		return
+	}
+	var req struct {
+		VolumeID string `json:"volume_id"`
+	}
+	if err := emulator.DecodeJSON(r, &req); err != nil {
+		writeInvalidArguments(w, ArgumentError{ArgumentName: "body", Reason: "format", HelpMessage: err.Error()})
+		return
+	}
+
+	volumes := volumeMapOf(res)
+	for key, entry := range volumes {
+		view, _ := entry.(map[string]any)
+		if view == nil || view["id"] != req.VolumeID {
+			continue
+		}
+		delete(volumes, key)
+		if vol, ok := p.env.Store.Get(Name, kindVolume, req.VolumeID); ok {
+			p.detachVolume(vol)
+			p.env.Store.Put(vol)
+		}
+		res.Attrs["volumes"] = volumes
+		if !p.env.Store.Commit(res, p.env.Now()) {
+			writeNotFound(w, "server", id)
+			return
+		}
+		emulator.WriteJSON(w, http.StatusOK, map[string]any{"server": p.view(res)})
+		return
+	}
+	writeNotFound(w, "volume", req.VolumeID)
+}
+
+// volumeMapOf is the server's volume map, always a map even when the attribute
+// is missing: the Terraform provider sizes a slice from its length and panics
+// the plugin on a nil one.
+func volumeMapOf(res *resource.Resource) map[string]any {
+	volumes, _ := res.Attrs["volumes"].(map[string]any)
+	if volumes == nil {
+		volumes = map[string]any{}
+	}
+	return volumes
+}
+
+// nextVolumeKey is the first free slot. The keys are the API's own ordering and
+// "0" is always the root volume.
+func (p *Pack) nextVolumeKey(res *resource.Resource) string {
+	volumes := volumeMapOf(res)
+	for i := 1; ; i++ {
+		key := strconv.Itoa(i)
+		if _, taken := volumes[key]; !taken {
+			return key
+		}
+	}
 }

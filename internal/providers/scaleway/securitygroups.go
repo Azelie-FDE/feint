@@ -14,11 +14,16 @@ import (
 // Security groups are the control plane of the Scaleway firewall: a group holds
 // a default policy per direction, and an ordered list of rules that override it.
 //
-// The emulator serves the whole product and applies none of it. That gap is
-// deliberate and must stay visible (docs/limits.md): a client can create groups
-// and rules, read them back identically and drive Terraform through a full
-// apply/destroy, but no packet is ever filtered. Pretending otherwise would be
-// the exact defect this project criticises elsewhere.
+// What the emulator does with them depends on the mode, and saying so is the
+// point. With no machine runtime the whole product is served and none of it is
+// applied: a client creates groups and rules, reads them back identically and
+// drives Terraform through a full apply/destroy, and no packet is filtered.
+// With --vm the rules are attached to the interfaces and do filter, within the
+// bounds docs/limits.md states.
+//
+// This comment used to claim the first case unconditionally, months after the
+// second became true — the half-truth-without-naming-the-mode that this
+// repository's own instructions single out.
 //
 // Shapes come from the SDK (api/instance/v1/instance_sdk.go): SecurityGroup,
 // SecurityGroupRule, and the Create/List/Get/Update request and response types.
@@ -272,21 +277,12 @@ func (p *Pack) deleteSecurityGroup(w http.ResponseWriter, r *http.Request) {
 	// that error: without it a destroy silently removes the group every later
 	// server creation needs.
 	if isProjectDefault(res) {
-		emulator.WriteJSON(w, http.StatusBadRequest, APIError{
-			Type:       "precondition_failed",
-			Message:    "cannot delete the default security group of the project",
-			Resource:   "security_group",
-			ResourceID: res.ID,
-		})
+		writePrecondition(w, "security_group", res.ID, "the default security group of a project cannot be deleted")
 		return
 	}
 	if servers := p.serversUsing(res); len(servers) > 0 {
-		emulator.WriteJSON(w, http.StatusBadRequest, APIError{
-			Type:       "precondition_failed",
-			Message:    "security group is still attached to " + servers[0] + " and cannot be deleted",
-			Resource:   "security_group",
-			ResourceID: res.ID,
-		})
+		writePrecondition(w, "security_group", res.ID,
+			"the security group is still attached to "+servers[0]+" and cannot be deleted")
 		return
 	}
 

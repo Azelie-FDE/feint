@@ -13,6 +13,7 @@ package scaleway
 
 import (
 	"net/http"
+	"slices"
 	"sync"
 
 	"github.com/stephrobert/feint/internal/core/emulator"
@@ -67,8 +68,10 @@ func (p *Pack) Routes() []emulator.Route {
 		{Method: "PATCH", Path: zones + "/ips/{id}", Operation: "instance/v1/API.UpdateIP", Handler: p.updateIP},
 		{Method: "DELETE", Path: zones + "/ips/{id}", Operation: "instance/v1/API.DeleteIP", Handler: p.deleteIP},
 
-		// Security groups and their rules. The whole product is served and none
-		// of it is enforced: see securitygroups.go and docs/limits.md.
+		// Security groups and their rules. The whole product is served, and the
+		// rules are enforced when a machine runtime is configured: docs/limits.md
+		// records the measurement. Without --vm there is no packet to filter, so
+		// the control plane answers and nothing is applied.
 		{Method: "GET", Path: zones + "/security_groups", Operation: "instance/v1/API.ListSecurityGroups", Handler: p.listSecurityGroups},
 		{Method: "POST", Path: zones + "/security_groups", Operation: "instance/v1/API.CreateSecurityGroup", Handler: p.createSecurityGroup},
 		{Method: "GET", Path: zones + "/security_groups/{id}", Operation: "instance/v1/API.GetSecurityGroup", Handler: p.getSecurityGroup},
@@ -111,6 +114,11 @@ func (p *Pack) Routes() []emulator.Route {
 		{Method: "GET", Path: zones + "/volumes/{id}", Operation: "instance/v1/API.GetVolume", Handler: p.getVolume},
 		{Method: "PATCH", Path: zones + "/volumes/{id}", Operation: "instance/v1/API.UpdateVolume", Handler: p.updateVolume},
 		{Method: "DELETE", Path: zones + "/volumes/{id}", Operation: "instance/v1/API.DeleteVolume", Handler: p.deleteVolume},
+		// The pair `scw instance server terminate` walks before terminating:
+		// every emulated server owns a root volume, so the CLI always detaches
+		// first, and a 501 here failed the command outright.
+		{Method: "POST", Path: zones + "/servers/{id}/attach-volume", Operation: "instance/v1/API.AttachServerVolume", Handler: p.attachServerVolume},
+		{Method: "POST", Path: zones + "/servers/{id}/detach-volume", Operation: "instance/v1/API.DetachServerVolume", Handler: p.detachServerVolume},
 
 		// VPCs and Private Networks. This is what turns a declared block into a
 		// real bridge: the subnet is validated, checked against its siblings for
@@ -174,35 +182,167 @@ func (p *Pack) NotFound(w http.ResponseWriter, r *http.Request) {
 // answers and only the first belongs here. What stays unknown in the coverage
 // report is work this project intends to do, which is what makes that report
 // a list somebody can act on rather than a number nobody reads.
-func (p *Pack) Declined() []string {
-	return []string{
-		// Scaleway's own inventory: the dashboard, the product catalogue, the
-		// quotas. A local emulator has none of it and cannot invent it without
-		// telling a client something false about capacity.
-		"instance/v1/API.GetDashboard",
-		"instance/v1/API.GetServerTypesAvailability",
-		"instance/v1/API.GetServerCompatibleTypes",
-		"instance/v1/API.ListVolumesTypes",
-		"instance/v1/API.CheckBlockMigrationOrganizationQuotas",
+func (p *Pack) Declined() []emulator.Decline {
+	return slices.Concat(
+		// SW-1's second half: the instance, vpc and ipam columns the gate showed
+		// as untriaged. Every block below says what the emulator would have to
+		// have in order to answer, which is what makes a refusal revisitable —
+		// "not triaged yet" and "out of scope" are different answers.
+
+		// A snapshot and an image are bytes. An emulated volume is a size and a
+		// name in a store, with nothing written behind it.
+		emulator.Because("a snapshot copies the bytes of a volume, and an emulated volume is a size and a name with nothing written behind it, so the object produced would restore nothing",
+			"instance/v1/API.CreateSnapshot",
+			"instance/v1/API.DeleteSnapshot",
+			"instance/v1/API.GetSnapshot",
+			"instance/v1/API.ListSnapshots",
+			"instance/v1/API.UpdateSnapshot"),
+
+		// The catalogue is a fixed table, for the reason CLAUDE.md records: the
+		// CLI resolves a default image before it creates anything, so the table
+		// exists to be read, not to be written.
+		emulator.Because("the pack answers image lookups from the fixed catalogue the CLI resolves against, so creating or editing one would edit a table nothing can add to",
+			"instance/v1/API.CreateImage",
+			"instance/v1/API.DeleteImage",
+			"instance/v1/API.UpdateImage"),
+
+		// ListImages only reads, so the reason above is false of it. Its own is
+		// that GetImage answers from the catalogue by id, which is what the CLI
+		// resolves against; listing would publish the table as an inventory.
+		emulator.Because("the catalogue exists so the CLI can resolve one image by id before a create, and listing it would publish six fixed entries as if they were an inventory a client could grow",
+			"instance/v1/API.ListImages"),
+
+		emulator.Because("placement constrains which physical hosts run a machine, and every emulated machine runs on the single host that started feint, so any policy would be reported satisfied whatever it asked",
+			"instance/v1/API.CreatePlacementGroup",
+			"instance/v1/API.DeletePlacementGroup",
+			"instance/v1/API.GetPlacementGroup",
+			"instance/v1/API.GetPlacementGroupServers",
+			"instance/v1/API.ListPlacementGroups",
+			"instance/v1/API.SetPlacementGroup",
+			"instance/v1/API.SetPlacementGroupServers",
+			"instance/v1/API.UpdatePlacementGroup",
+			"instance/v1/API.UpdatePlacementGroupServers"),
+
+		emulator.Because("it mounts Scaleway's File Storage product, and there is no filesystem service behind this emulator for a machine to mount",
+			"instance/v1/API.AttachServerFileSystem",
+			"instance/v1/API.DetachServerFileSystem"),
+
+		// Written by hand in instance_utils.go and marked deprecated there, which
+		// is why the scan sees them at all: it reads every non-test file rather
+		// than the generated ones only.
+		emulator.Because("the SDK's hand-written helpers, deprecated upstream in favour of AttachServerVolume and DetachServerVolume, which this pack serves and which the CLI calls",
+			"instance/v1/API.AttachVolume",
+			"instance/v1/API.DetachVolume"),
+
+		emulator.Because("the server already publishes allowed_actions, derived from its state, so a second listing would be a second place to keep in step with the first",
+			"instance/v1/API.ListServerActions"),
+
+		emulator.Because("its request carries tags and nothing else, and the pack stores no tag on a private NIC, so it would answer success over a field nothing reads back",
+			"instance/v1/API.UpdatePrivateNIC"),
+
+		// The IPAM half, and the reason it is read-only here.
+		emulator.Because("addresses come from the subnet plan a server or a private NIC is placed in rather than from a client reservation, so booking or moving one would hand out an address no runtime configures",
+			"instance/v1/API.ReleaseIPToIpam",
+			"ipam/v1/API.AttachIP",
+			"ipam/v1/API.BookIP",
+			"ipam/v1/API.DetachIP",
+			"ipam/v1/API.MoveIP",
+			"ipam/v1/API.ReleaseIP",
+			"ipam/v1/API.ReleaseIPSet",
+			"ipam/v1/API.UpdateIP"),
+
+		// Routing, and the honest half of the mode difference: only OVN has a
+		// router to program, and a route the bridge mode cannot apply is a
+		// topology the packets do not follow.
+		emulator.Because("routing between private networks belongs to the runtime, and only the OVN mode has a router to program, so a route recorded in bridge mode would describe a path the packets do not take",
+			"vpc/v2/API.CreateRoute",
+			"vpc/v2/API.DeleteRoute",
+			"vpc/v2/API.GetRoute",
+			"vpc/v2/API.UpdateRoute",
+			"vpc/v2/API.EnableRouting",
+			"vpc/v2/API.EnableCustomRoutesPropagation",
+			"vpc/v2/RoutesWithNexthopAPI.ListRoutesWithNexthop"),
+
+		// A rule recorded and never enforced is worse than a refusal: it is
+		// indistinguishable from protection.
+		emulator.Because("filtering at the VPC edge has no edge here, since nothing routes between the host and these networks, so a rule would be recorded and never enforced",
+			"vpc/v2/API.CreateIngressRule",
+			"vpc/v2/API.DeleteIngressRule",
+			"vpc/v2/API.GetIngressRule",
+			"vpc/v2/API.ListIngressRules",
+			"vpc/v2/API.UpdateIngressRule",
+			"vpc/v2/API.GetACL",
+			"vpc/v2/API.SetACL"),
+
+		// Peering is the exact inverse of the property this project measures.
+		emulator.Because("it peers two VPCs, and isolation between two VPCs is the one property the bridge mode cannot deliver: joining them would report done what was never apart",
+			"vpc/v2/API.CreateVPCConnector",
+			"vpc/v2/API.DeleteVPCConnector",
+			"vpc/v2/API.GetVPCConnector",
+			"vpc/v2/API.ListVPCConnectors",
+			"vpc/v2/API.UpdateVPCConnector"),
+
+		emulator.Because("the runtime writes a fixed address on each interface at boot instead of leasing one, so there is no DHCP server behind these networks to enable",
+			"vpc/v2/API.EnableDHCP"),
+
+		emulator.Because("the pack publishes a private network's subnets on the network itself, which is where ListPrivateNetworks already returns them",
+			"vpc/v2/API.ListSubnets"),
+
+		emulator.Because("it compares the subnets of a fleet of VPCs against each other, and no client in tools/conformance drives it",
+			"vpc/v2/API.ListSubnetOverlaps"),
+
+		emulator.Because("the CLI resolves its default image through ListLocalImages, which is served, so a per-id lookup would be a second door onto the same fixed table",
+			"marketplace/v2/API.GetLocalImage"),
+
+		// The provider's fleet: what types are available, what a quota allows,
+		// what a migration would be permitted. A local emulator has none of it
+		// and cannot invent headroom without telling a client something false
+		// about capacity. The dashboard used to be listed here and is not, for a
+		// reason the next block gives.
+		emulator.Because("capacity and quotas are the provider's fleet, and a local emulator that answered would be inventing headroom a client could plan against",
+			"instance/v1/API.GetServerTypesAvailability",
+			"instance/v1/API.GetServerCompatibleTypes",
+			"instance/v1/API.CheckBlockMigrationOrganizationQuotas"),
+
+		// GetDashboard is separated from the group above, because "no inventory"
+		// was false about it. The thirteen counters it returns — servers,
+		// volumes, images, snapshots, IPs, security groups, placement groups —
+		// are the tenant's own resources, and the store holds several of them.
+		// An audit checked the SDK struct and was right. The reason it is
+		// declined is the other half: it also counts products this pack does not
+		// serve, so every total would be short by the unemulated remainder with
+		// nothing in the answer saying which.
+		// ListVolumesTypes is not in the block above, and an audit was right to
+		// say so: it returns a catalogue of volume types with their constraints,
+		// which is the same nature as ListServersTypes — served. It is declined
+		// for the reason that actually applies to it.
+		emulator.Because("the emulator serves one volume type, b_ssd, because that is what its catalogue attaches, so a type list would describe capabilities nothing here can create",
+			"instance/v1/API.ListVolumesTypes"),
+
+		emulator.Because("its thirteen counters span resources this pack does not serve, so every total would be short by the unemulated remainder with nothing saying which",
+			"instance/v1/API.GetDashboard"),
 
 		// The rule set Scaleway seeds a new security group with is a value, and
 		// the SDK carries shapes. Serving an invented list would tell a client
 		// which ports are open on a runtime that filters nothing. Trade it for
 		// real values the day someone measures them against the real API.
-		"instance/v1/API.ListDefaultSecurityGroupRules",
+		emulator.Because("the seeded rule set is a value the SDK does not carry, so an invented list would state which ports a real client believes are open, and docs/limits.md records that these rules do filter packets",
+			"instance/v1/API.ListDefaultSecurityGroupRules"),
 
 		// Migrating a legacy local volume, or a snapshot of one, to Scaleway
 		// Block Storage. Every volume served here is already of the current
 		// kind, so a plan would list nothing and applying it would confirm a
 		// move that never happened.
-		"instance/v1/API.PlanBlockMigration",
-		"instance/v1/API.ApplyBlockMigration",
+		emulator.Because("there is no legacy storage behind this emulator to migrate from, so a plan would describe a move between two things that are the same store",
+			"instance/v1/API.PlanBlockMigration",
+			"instance/v1/API.ApplyBlockMigration"),
 
 		// Writes a snapshot into an Object Storage bucket, and Object Storage
 		// is not emulated: the Terraform provider builds the S3 endpoint from
 		// the region in code, so pointing it here would take DNS interception
 		// and a certificate it accepts. The measurement is in docs/limits.md.
-		"instance/v1/API.ExportSnapshot",
+		emulator.Because("it writes into Object Storage, which is not emulated because the Terraform provider builds the S3 endpoint in code: supporting it needs DNS interception and a certificate, measured in docs/limits.md",
+			"instance/v1/API.ExportSnapshot"),
 
 		// The metadata service answers on the link-local address
 		// 169.254.42.42, from inside the machine, to a caller that carries no
@@ -210,85 +350,232 @@ func (p *Pack) Declined() []string {
 		// and serving it would mean an HTTP listener inside every emulated
 		// machine. User data reaches the guest through the runtime instead,
 		// which is what cloud-init reads.
-		"instance/v1/MetadataAPI.GetMetadata",
-		"instance/v1/MetadataAPI.GetUserData",
-		"instance/v1/MetadataAPI.ListUserData",
-		"instance/v1/MetadataAPI.SetUserData",
-		"instance/v1/MetadataAPI.DeleteUserData",
+		emulator.Because("the metadata service answers on the link-local address 169.254.42.42, from inside the machine, to a caller that carries no credentials",
+			"instance/v1/MetadataAPI.GetMetadata",
+			"instance/v1/MetadataAPI.GetUserData",
+			"instance/v1/MetadataAPI.ListUserData",
+			"instance/v1/MetadataAPI.SetUserData",
+			"instance/v1/MetadataAPI.DeleteUserData"),
+
+		// IAM, everything except the SSH keys the pack serves.
+		//
+		// Users, groups, applications, policies, API keys, JWTs, SAML, SCIM,
+		// WebAuthn, MFA, the security settings and the audit log. The emulator
+		// accepts every credential on purpose — SECURITY.md states it and
+		// docs/roadmap.md lists verifying signatures under Not planned — so an
+		// access control served here would describe rules nothing enforces: a
+		// client could read back a policy denying an action and watch the
+		// emulator perform it.
+		//
+		// SSH keys are the exception and stay served, because they are not access
+		// control: they are the public key a machine boots with, and cloud-init
+		// installs it for real when --vm is on.
+		emulator.Because("the emulator accepts every credential on purpose, so serving users, policies and keys would describe an access control that nothing here enforces",
+			"iam/v1alpha1/API.AddGroupMember",
+			"iam/v1alpha1/API.AddGroupMembers",
+			"iam/v1alpha1/API.AddSamlCertificate",
+			"iam/v1alpha1/API.ClonePolicy",
+			"iam/v1alpha1/API.CreateAPIKey",
+			"iam/v1alpha1/API.CreateApplication",
+			"iam/v1alpha1/API.CreateGroup",
+			"iam/v1alpha1/API.CreateJWT",
+			"iam/v1alpha1/API.CreatePolicy",
+			"iam/v1alpha1/API.CreateScimToken",
+			"iam/v1alpha1/API.CreateUser",
+			"iam/v1alpha1/API.CreateUserMFAOTP",
+			"iam/v1alpha1/API.DeleteAPIKey",
+			"iam/v1alpha1/API.DeleteApplication",
+			"iam/v1alpha1/API.DeleteGroup",
+			"iam/v1alpha1/API.DeleteJWT",
+			"iam/v1alpha1/API.DeletePolicy",
+			"iam/v1alpha1/API.DeleteSaml",
+			"iam/v1alpha1/API.DeleteSamlCertificate",
+			"iam/v1alpha1/API.DeleteScim",
+			"iam/v1alpha1/API.DeleteScimToken",
+			"iam/v1alpha1/API.DeleteUser",
+			"iam/v1alpha1/API.DeleteUserMFAOTP",
+			"iam/v1alpha1/API.DeleteWebAuthnAuthenticator",
+			"iam/v1alpha1/API.EnableOrganizationSaml",
+			"iam/v1alpha1/API.EnableOrganizationScim",
+			"iam/v1alpha1/API.FinishUserWebAuthnRegistration",
+			"iam/v1alpha1/API.GetAPIKey",
+			"iam/v1alpha1/API.GetApplication",
+			"iam/v1alpha1/API.GetGroup",
+			"iam/v1alpha1/API.GetJWT",
+			"iam/v1alpha1/API.GetLog",
+			"iam/v1alpha1/API.GetOrganization",
+			"iam/v1alpha1/API.GetOrganizationSaml",
+			"iam/v1alpha1/API.GetOrganizationScim",
+			"iam/v1alpha1/API.GetOrganizationSecuritySettings",
+			"iam/v1alpha1/API.GetPolicy",
+			"iam/v1alpha1/API.GetQuotum",
+			"iam/v1alpha1/API.GetSamlCertificate",
+			"iam/v1alpha1/API.GetUser",
+			"iam/v1alpha1/API.GetUserConnections",
+			"iam/v1alpha1/API.InitiateUserConnection",
+			"iam/v1alpha1/API.JoinUserConnection",
+			"iam/v1alpha1/API.ListAPIKeys",
+			"iam/v1alpha1/API.ListApplications",
+			"iam/v1alpha1/API.ListGracePeriods",
+			"iam/v1alpha1/API.ListGroups",
+			"iam/v1alpha1/API.ListJWTs",
+			"iam/v1alpha1/API.ListLogs",
+			"iam/v1alpha1/API.ListPermissionSets",
+			"iam/v1alpha1/API.ListPolicies",
+			"iam/v1alpha1/API.ListQuota",
+			"iam/v1alpha1/API.ListRules",
+			"iam/v1alpha1/API.ListSamlCertificates",
+			"iam/v1alpha1/API.ListScimTokens",
+			"iam/v1alpha1/API.ListUserWebAuthnAuthenticators",
+			"iam/v1alpha1/API.ListUsers",
+			"iam/v1alpha1/API.LockUser",
+			"iam/v1alpha1/API.ParseSamlMetadata",
+			"iam/v1alpha1/API.RemoveGroupMember",
+			"iam/v1alpha1/API.RemoveUserConnection",
+			"iam/v1alpha1/API.SetGroupMembers",
+			"iam/v1alpha1/API.SetOrganizationAlias",
+			"iam/v1alpha1/API.SetRules",
+			"iam/v1alpha1/API.StartUserWebAuthnRegistration",
+			"iam/v1alpha1/API.UnlockUser",
+			"iam/v1alpha1/API.UpdateAPIKey",
+			"iam/v1alpha1/API.UpdateApplication",
+			"iam/v1alpha1/API.UpdateGroup",
+			"iam/v1alpha1/API.UpdateOrganizationLoginMethods",
+			"iam/v1alpha1/API.UpdateOrganizationSecuritySettings",
+			"iam/v1alpha1/API.UpdatePolicy",
+			"iam/v1alpha1/API.UpdateSaml",
+			"iam/v1alpha1/API.UpdateUser",
+			"iam/v1alpha1/API.UpdateUserPassword",
+			"iam/v1alpha1/API.UpdateUserUsername",
+			"iam/v1alpha1/API.UpdateWebAuthnAuthenticator",
+			"iam/v1alpha1/API.ValidateUserMFAOTP"),
+
+		// The marketplace beyond the local images the emulator serves.
+		//
+		// Categories, versions and the global image index are a catalogue of
+		// every image Scaleway publishes across every zone. The emulator has a
+		// small fixed table instead, and answering the index from it would either
+		// list images no local image maps to, or claim the catalogue is six
+		// entries long.
+		//
+		// GetLocalImage used to be described here as deliberately kept off the
+		// list; it is now declined, with its own reason, in the SW-1 block above.
+		// What the CLI walks before a create is ListLocalImages, which is served
+		// — that is the call the trap is about, and an audit found this comment
+		// contradicting the block it introduces.
+		emulator.Because("the global image index spans every image Scaleway publishes in every zone, and the emulator answers from a small fixed table that would either list images it cannot boot or claim the catalogue is six entries long",
+			"marketplace/v2/API.GetCategory",
+			"marketplace/v2/API.GetImage",
+			"marketplace/v2/API.GetVersion",
+			"marketplace/v2/API.ListCategories",
+			"marketplace/v2/API.ListImages",
+			"marketplace/v2/API.ListVersions"),
+
+		// The five S3 endpoints vpc/v2 grew since the last scan. They attach a
+		// private network to Object Storage, and Object Storage is refused here
+		// for a reason docs/limits.md measured: the Terraform provider builds the
+		// S3 endpoint from the region in code, so serving it needs DNS
+		// interception and a certificate the client accepts.
+		emulator.Because("they attach a private network to Object Storage, which is not emulated because the Terraform provider builds that endpoint in code, measured in docs/limits.md",
+			"vpc/v2/API.AddPrivateNetworkS3Endpoint",
+			"vpc/v2/API.DeletePrivateNetworkS3Endpoint",
+			"vpc/v2/API.DisableS3Endpoint",
+			"vpc/v2/API.EnableS3Endpoint",
+			"vpc/v2/API.SetPrivateNetworksS3Endpoint"),
 
 		// ipam/v1alpha1 is the superseded draft of ipam/v1, which is served.
-		"ipam/v1alpha1/API.ListIPs",
+		emulator.Because("ipam/v1alpha1 is the superseded draft of ipam/v1, which is served",
+			"ipam/v1alpha1/API.ListIPs"),
 
-		// instance/v2alpha1 is an alpha rewrite of the whole instance API, and
-		// it duplicates surface that v1 already serves. No client reaches for
-		// it: the conformance suite drives scw and Terraform end to end and
-		// every request lands on v1. Emulating both would double the work and
-		// pin down shapes Scaleway is still free to change.
+		// instance/v2alpha1 is an alpha rewrite of the whole instance API.
+		//
+		// "It duplicates what v1 serves" was the argument here and it was
+		// wrong, measured: of the thirteen VolumeAPI operations, v1's snapshot
+		// surface is untriaged and its ListVolumesTypes and ExportSnapshot are
+		// themselves declined, so eight of them duplicate nothing this pack
+		// serves. The decision stands on the other two legs — no client reaches
+		// for it (neither the scw binary nor the pinned Terraform provider
+		// carries the string), and emulating an alpha pins down shapes Scaleway
+		// is still free to change.
 		//
 		// Listed one by one on purpose. A prefix rule would swallow whatever
 		// upstream adds here, and the point of this file is that additions are
 		// seen. When the surface stabilises into an instance/v2, the scan
 		// reports it as new and this decision gets taken again.
-		"instance/v2alpha1/API.AddSecurityGroupRules",
-		"instance/v2alpha1/API.AttachServerFileSystem",
-		"instance/v2alpha1/API.AttachServerIP",
-		"instance/v2alpha1/API.AttachServerPrivateNetworkInterface",
-		"instance/v2alpha1/API.AttachServerVolume",
-		"instance/v2alpha1/API.CheckTemplate",
-		"instance/v2alpha1/API.CreatePlacementGroup",
-		"instance/v2alpha1/API.CreatePrivateNetworkInterface",
-		"instance/v2alpha1/API.CreateSecurityGroup",
-		"instance/v2alpha1/API.CreateServer",
-		"instance/v2alpha1/API.CreateServerFromTemplate",
-		"instance/v2alpha1/API.CreateTemplate",
-		"instance/v2alpha1/API.DeletePlacementGroup",
-		"instance/v2alpha1/API.DeletePrivateNetworkInterface",
-		"instance/v2alpha1/API.DeleteSecurityGroup",
-		"instance/v2alpha1/API.DeleteSecurityGroupRules",
-		"instance/v2alpha1/API.DeleteServer",
-		"instance/v2alpha1/API.DeleteTemplate",
-		"instance/v2alpha1/API.DeleteTemplateUserData",
-		"instance/v2alpha1/API.DeleteUserData",
-		"instance/v2alpha1/API.DetachServerFileSystem",
-		"instance/v2alpha1/API.DetachServerIP",
-		"instance/v2alpha1/API.DetachServerPrivateNetworkInterface",
-		"instance/v2alpha1/API.DetachServerVolume",
-		"instance/v2alpha1/API.GetPlacementGroup",
-		"instance/v2alpha1/API.GetPrivateNetworkInterface",
-		"instance/v2alpha1/API.GetResourceCounts",
-		"instance/v2alpha1/API.GetSecurityGroup",
-		"instance/v2alpha1/API.GetServer",
-		"instance/v2alpha1/API.GetServerCloudInit",
-		"instance/v2alpha1/API.GetTemplate",
-		"instance/v2alpha1/API.GetTemplateCloudInit",
-		"instance/v2alpha1/API.GetTemplateUserData",
-		"instance/v2alpha1/API.GetUserData",
-		"instance/v2alpha1/API.ListPlacementGroups",
-		"instance/v2alpha1/API.ListPrivateNetworkInterfaces",
-		"instance/v2alpha1/API.ListSecurityGroups",
-		"instance/v2alpha1/API.ListServerTypes",
-		"instance/v2alpha1/API.ListServers",
-		"instance/v2alpha1/API.ListTemplateUserDataKeys",
-		"instance/v2alpha1/API.ListTemplates",
-		"instance/v2alpha1/API.ListUserDataKeys",
-		"instance/v2alpha1/API.PauseServer",
-		"instance/v2alpha1/API.RebootServer",
-		"instance/v2alpha1/API.SetSecurityGroupRules",
-		"instance/v2alpha1/API.SetServerCloudInit",
-		"instance/v2alpha1/API.SetServerDefaultIP",
-		"instance/v2alpha1/API.SetTemplateCloudInit",
-		"instance/v2alpha1/API.SetTemplateUserData",
-		"instance/v2alpha1/API.SetUserData",
-		"instance/v2alpha1/API.StartServer",
-		"instance/v2alpha1/API.StopAndDeleteServer",
-		"instance/v2alpha1/API.StopServer",
-		"instance/v2alpha1/API.UpdatePlacementGroup",
-		"instance/v2alpha1/API.UpdatePrivateNetworkInterface",
-		"instance/v2alpha1/API.UpdateSecurityGroup",
-		"instance/v2alpha1/API.UpdateSecurityGroupRule",
-		"instance/v2alpha1/API.UpdateServer",
-		"instance/v2alpha1/API.UpdateTemplate",
-	}
+		emulator.Because("instance/v2alpha1 is an alpha rewrite Scaleway is still free to change, and no client this project drives reaches for it: every instance request the conformance suite makes lands on v1",
+			"instance/v2alpha1/VolumeAPI.CreateSnapshot",
+			"instance/v2alpha1/VolumeAPI.CreateVolume",
+			"instance/v2alpha1/VolumeAPI.DeleteSnapshot",
+			"instance/v2alpha1/VolumeAPI.DeleteVolume",
+			"instance/v2alpha1/VolumeAPI.ExportSnapshotToObjectStorage",
+			"instance/v2alpha1/VolumeAPI.GetSnapshot",
+			"instance/v2alpha1/VolumeAPI.GetVolume",
+			"instance/v2alpha1/VolumeAPI.ImportSnapshotFromObjectStorage",
+			"instance/v2alpha1/VolumeAPI.ListSnapshots",
+			"instance/v2alpha1/VolumeAPI.ListVolumeTypes",
+			"instance/v2alpha1/VolumeAPI.ListVolumes",
+			"instance/v2alpha1/VolumeAPI.UpdateSnapshot",
+			"instance/v2alpha1/VolumeAPI.UpdateVolume",
+			"instance/v2alpha1/API.AddSecurityGroupRules",
+			"instance/v2alpha1/API.AttachServerFileSystem",
+			"instance/v2alpha1/API.AttachServerIP",
+			"instance/v2alpha1/API.AttachServerPrivateNetworkInterface",
+			"instance/v2alpha1/API.AttachServerVolume",
+			"instance/v2alpha1/API.CheckTemplate",
+			"instance/v2alpha1/API.CreatePlacementGroup",
+			"instance/v2alpha1/API.CreatePrivateNetworkInterface",
+			"instance/v2alpha1/API.CreateSecurityGroup",
+			"instance/v2alpha1/API.CreateServer",
+			"instance/v2alpha1/API.CreateServerFromTemplate",
+			"instance/v2alpha1/API.CreateTemplate",
+			"instance/v2alpha1/API.DeletePlacementGroup",
+			"instance/v2alpha1/API.DeletePrivateNetworkInterface",
+			"instance/v2alpha1/API.DeleteSecurityGroup",
+			"instance/v2alpha1/API.DeleteSecurityGroupRules",
+			"instance/v2alpha1/API.DeleteServer",
+			"instance/v2alpha1/API.DeleteTemplate",
+			"instance/v2alpha1/API.DeleteTemplateUserData",
+			"instance/v2alpha1/API.DeleteUserData",
+			"instance/v2alpha1/API.DetachServerFileSystem",
+			"instance/v2alpha1/API.DetachServerIP",
+			"instance/v2alpha1/API.DetachServerPrivateNetworkInterface",
+			"instance/v2alpha1/API.DetachServerVolume",
+			"instance/v2alpha1/API.GetPlacementGroup",
+			"instance/v2alpha1/API.GetPrivateNetworkInterface",
+			"instance/v2alpha1/API.GetResourceCounts",
+			"instance/v2alpha1/API.GetSecurityGroup",
+			"instance/v2alpha1/API.GetServer",
+			"instance/v2alpha1/API.GetServerCloudInit",
+			"instance/v2alpha1/API.GetTemplate",
+			"instance/v2alpha1/API.GetTemplateCloudInit",
+			"instance/v2alpha1/API.GetTemplateUserData",
+			"instance/v2alpha1/API.GetUserData",
+			"instance/v2alpha1/API.ListPlacementGroups",
+			"instance/v2alpha1/API.ListPrivateNetworkInterfaces",
+			"instance/v2alpha1/API.ListSecurityGroups",
+			"instance/v2alpha1/API.ListServerTypes",
+			"instance/v2alpha1/API.ListServers",
+			"instance/v2alpha1/API.ListTemplateUserDataKeys",
+			"instance/v2alpha1/API.ListTemplates",
+			"instance/v2alpha1/API.ListUserDataKeys",
+			"instance/v2alpha1/API.PauseServer",
+			"instance/v2alpha1/API.RebootServer",
+			"instance/v2alpha1/API.SetSecurityGroupRules",
+			"instance/v2alpha1/API.SetServerCloudInit",
+			"instance/v2alpha1/API.SetServerDefaultIP",
+			"instance/v2alpha1/API.SetTemplateCloudInit",
+			"instance/v2alpha1/API.SetTemplateUserData",
+			"instance/v2alpha1/API.SetUserData",
+			"instance/v2alpha1/API.StartServer",
+			"instance/v2alpha1/API.StopAndDeleteServer",
+			"instance/v2alpha1/API.StopServer",
+			"instance/v2alpha1/API.UpdatePlacementGroup",
+			"instance/v2alpha1/API.UpdatePrivateNetworkInterface",
+			"instance/v2alpha1/API.UpdateSecurityGroup",
+			"instance/v2alpha1/API.UpdateSecurityGroupRule",
+			"instance/v2alpha1/API.UpdateServer",
+			"instance/v2alpha1/API.UpdateTemplate"),
+	)
 }
 
 // The zone and region a client defaults to when it is given none. They are the
