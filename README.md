@@ -313,28 +313,21 @@ the emulator.
 
 ### Exoscale — the `exo` CLI
 
-`exo` has no endpoint flag and no endpoint environment variable. It is redirected
-only through the `endpoint` key of its own configuration file, and that value
-**must carry the `/v2` suffix**: the CLI concatenates it with the route it wants
-rather than adding a version segment. Both facts were found by putting a logging
-proxy between the CLI and the emulator; neither is documented anywhere.
+`exo` is redirected through the `EXOSCALE_API_ENDPOINT` environment variable, or
+the `endpoint` key of its own configuration file, and that value **must carry the
+`/v2` suffix**: the CLI concatenates it with the route it wants rather than
+adding a version segment. Measured on `exo` 1.95.1, in both directions: pointed
+at the emulator it drives it, pointed at a dead port it fails naming that port.
 
 ```bash
-cat > /tmp/exoscale.toml <<'EOF'
-defaultaccount = "feint"
+export EXOSCALE_API_ENDPOINT=http://127.0.0.1:4599/v2
+export EXOSCALE_API_KEY=EXOxxxxxxxxxxxxxxxxxxxx
+export EXOSCALE_API_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-[[accounts]]
-name = "feint"
-account = "feint"
-key = "EXOxxxxxxxxxxxxxxxxxxxx"
-secret = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-endpoint = "http://127.0.0.1:4599/v2"
-EOF
-
-exo -C /tmp/exoscale.toml compute instance-template list
-exo -C /tmp/exoscale.toml compute instance create demo \
+exo compute instance-template list
+exo compute instance create demo \
   --zone ch-dk-2 --template "Linux Ubuntu 24.04 LTS 64-bit" --instance-type standard.tiny
-exo -C /tmp/exoscale.toml compute instance list
+exo compute instance list
 ```
 
 ### Ask the emulator what it is doing
