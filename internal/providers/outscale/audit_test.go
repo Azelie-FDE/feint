@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/stephrobert/feint/internal/contract"
 	"github.com/stephrobert/feint/internal/core/emulator"
 	"github.com/stephrobert/feint/internal/core/machine"
 	"github.com/stephrobert/feint/internal/providers/outscale"
@@ -211,6 +215,12 @@ func TestAKeypairRefusesWhatIsNotAKey(t *testing.T) {
 	for _, bad := range []string{
 		"definitely not a key",
 		"ssh-rsa AAAA\nruncmd:\n  - touch /tmp/pwned",
+		// Well-shaped and not a key: the algorithm is real, the material is not
+		// base64. Scaleway refused it and Outscale took it, which is what a
+		// duplicated check does over time — and this test did not cover it, so
+		// the mutation that removes the check survived until it did.
+		"ssh-ed25519 !!!!not-base64-at-all!!!! user@host",
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI= trailing-garbage-in-material",
 		"",
 	} {
 		if bad == "" {
@@ -222,7 +232,11 @@ func TestAKeypairRefusesWhatIsNotAKey(t *testing.T) {
 	}
 	// The accepting half: a real key must pass, or the check would only be a way
 	// to refuse.
-	good := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleEx user@host"
+	// A real key, from ssh-keygen. The first version of this test used a
+	// plausible-looking string whose material is not valid base64, and it
+	// passed — because the pack did not check. Its own fixture was made of the
+	// defect it was meant to hold.
+	good := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIr6pEFlAFO3YU0DNW/r8SkpjdbptN9ockkO2BtIolSD conformance@feint"
 	if status, out := post(t, ts, "CreateKeypair", `{"KeypairName":"good","PublicKey":`+quote(good)+`}`); status != http.StatusOK {
 		t.Errorf("refused a real key: %d %v", status, out)
 	}
@@ -457,4 +471,576 @@ func newRuntimeServer(t *testing.T, drv machine.Driver) *httptest.Server {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+// Two concurrent starts reach the runtime once.
+//
+// The pack takes a per-target lock on its lifecycle paths, and its comment names
+// a measured defect: two concurrent StartVms each launched a container, and the
+// API described as stopped a machine that was running. Nothing held that.
+// Removing both Serialise calls left the whole suite green, which is the state
+// CLAUDE.md calls an intention written in the past tense.
+func TestTwoConcurrentStartsReachTheRuntimeOnce(t *testing.T) {
+	runtime := newCountingRuntime()
+	runtime.blockStarts = make(chan struct{})
+	ts := newRuntimeServer(t, runtime)
+	_, subnetID := netAndSubnet(t, ts, "10.52.0.0/16", "10.52.1.0/24")
+
+	_, out := post(t, ts, "CreateVms",
+		`{"ImageId":"ami-12345678","SubnetId":"`+subnetID+`","BootOnCreation":false}`)
+	vms, _ := out["Vms"].([]any)
+	vm, _ := vms[0].(map[string]any)
+	vmID, _ := vm["VmId"].(string)
+
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			post(t, ts, "StartVms", `{"VmIds":["`+vmID+`"]}`)
+		}()
+	}
+	// The first start is inside the runtime. The pause is for the second to
+	// reach either the lock (correct) or the runtime (the defect) before
+	// anything is released: letting go as soon as the first enters lets the
+	// second arrive after the first has committed, where the "already running"
+	// short-circuit hides the missing lock. Measured: without the pause this
+	// test passes with both Serialise calls removed.
+	<-runtime.startEntered
+	time.Sleep(50 * time.Millisecond)
+	close(runtime.blockStarts)
+	wg.Wait()
+
+	if n := runtime.starts(vmID); n > 1 {
+		t.Errorf("the runtime was asked to start %s %d times", vmID, n)
+	}
+	// And the machine really is running: a lock that refused both starts would
+	// pass the check above.
+	_, out = post(t, ts, "ReadVms", `{}`)
+	vms, _ = out["Vms"].([]any)
+	vm, _ = vms[0].(map[string]any)
+	if state, _ := vm["State"].(string); state != "running" {
+		t.Errorf("the machine is %q after two starts, want running", state)
+	}
+}
+
+// UpdateVm refuses what CreateVms refuses.
+//
+// The cap and the keypair check lived in the create only, so an update took a
+// 600 KiB user data and a keypair no keypair answers to. At the next start the
+// machine boots with no key, nobody logs in, and the API states one is attached.
+func TestUpdateVmValidatesWhatCreateValidates(t *testing.T) {
+	ts := newServer(t)
+	_, subnetID := netAndSubnet(t, ts, "10.53.0.0/16", "10.53.1.0/24")
+	_, out := post(t, ts, "CreateVms",
+		`{"ImageId":"ami-12345678","SubnetId":"`+subnetID+`","BootOnCreation":false}`)
+	vms, _ := out["Vms"].([]any)
+	vm, _ := vms[0].(map[string]any)
+	vmID, _ := vm["VmId"].(string)
+
+	if status, _ := post(t, ts, "UpdateVm",
+		`{"VmId":"`+vmID+`","KeypairName":"ghost-does-not-exist"}`); status == http.StatusOK {
+		t.Error("UpdateVm attached a keypair that does not exist")
+	}
+	oversized := strings.Repeat("A", 600*1024)
+	if status, _ := post(t, ts, "UpdateVm",
+		`{"VmId":"`+vmID+`","UserData":"`+oversized+`"}`); status == http.StatusOK {
+		t.Error("UpdateVm took a UserData the create refuses")
+	}
+	// The accepting half, or the check would only be a way to refuse.
+	if status, out := post(t, ts, "UpdateVm",
+		`{"VmId":"`+vmID+`","UserData":"aGVsbG8="}`); status != http.StatusOK {
+		t.Errorf("UpdateVm refused a legitimate change: %d %v", status, out)
+	}
+}
+
+// A Net does not delete under a Subnet being created.
+//
+// deleteNet carried the dependency guard and took no lock, so its subnet list
+// was empty by construction for the whole window a create was open: the Net
+// went, the Subnet landed in it, and its bridge stayed on the host.
+//
+// Honest limit, measured: this test also passes with deleteNet's lock removed,
+// because the sibling fix — reserving the subnet in the store before the runtime
+// call rather than after — closed the wide window on its own. What remains is
+// the few microseconds between subnetsOf and Delete, which nothing here can
+// widen. So the lock is argued from symmetry with deleteSubnet and from that
+// residual window; this test is the regression net over the invariant, and
+// TestSubnetCreateDoesNotHoldTheAddressingLockAcrossTheRuntime is the one that
+// dies under mutation.
+func TestANetDoesNotDeleteUnderASubnetBeingCreated(t *testing.T) {
+	runtime := newCountingRuntime()
+	runtime.blockNetworks = make(chan struct{})
+	ts := newRuntimeServer(t, runtime)
+
+	_, out := post(t, ts, "CreateNet", `{"IpRange":"10.54.0.0/16"}`)
+	n, _ := out["Net"].(map[string]any)
+	netID, _ := n["NetId"].(string)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		post(t, ts, "CreateSubnet", `{"NetId":"`+netID+`","IpRange":"10.54.1.0/24"}`)
+	}()
+
+	<-runtime.networkEntered
+	post(t, ts, "DeleteNet", `{"NetId":"`+netID+`"}`)
+	close(runtime.blockNetworks)
+	<-done
+
+	// Whoever won, no Subnet may name a Net the pack no longer serves.
+	_, out = post(t, ts, "ReadNets", `{}`)
+	nets, _ := out["Nets"].([]any)
+	live := map[string]bool{}
+	for _, entry := range nets {
+		m, _ := entry.(map[string]any)
+		id, _ := m["NetId"].(string)
+		live[id] = true
+	}
+	_, out = post(t, ts, "ReadSubnets", `{}`)
+	subnets, _ := out["Subnets"].([]any)
+	for _, entry := range subnets {
+		m, _ := entry.(map[string]any)
+		if id, _ := m["NetId"].(string); id != "" && !live[id] {
+			t.Errorf("%v names %s, a Net the pack no longer serves", m["SubnetId"], id)
+		}
+	}
+}
+
+// Creating a Subnet does not hold the addressing lock across the runtime call.
+//
+// Holding it put every other create in a queue behind `incus network create`:
+// measured at 1.5 s for one unrelated CreateNet with a fake driver, minutes with
+// Incus. The rule is the repository's own, and it had been applied to the Vm
+// path only.
+func TestSubnetCreateDoesNotHoldTheAddressingLockAcrossTheRuntime(t *testing.T) {
+	runtime := newCountingRuntime()
+	runtime.blockNetworks = make(chan struct{})
+	ts := newRuntimeServer(t, runtime)
+
+	_, out := post(t, ts, "CreateNet", `{"IpRange":"10.55.0.0/16"}`)
+	n, _ := out["Net"].(map[string]any)
+	netID, _ := n["NetId"].(string)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		post(t, ts, "CreateSubnet", `{"NetId":"`+netID+`","IpRange":"10.55.1.0/24"}`)
+	}()
+	<-runtime.networkEntered
+
+	// An unrelated create, while the runtime call is in flight. It must answer
+	// rather than wait for it.
+	answered := make(chan int, 1)
+	go func() {
+		status, _ := post(t, ts, "CreateNet", `{"IpRange":"10.56.0.0/16"}`)
+		answered <- status
+	}()
+	select {
+	case status := <-answered:
+		if status != http.StatusOK {
+			t.Errorf("the unrelated create answered %d", status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("an unrelated CreateNet waited on a runtime network call: the addressing lock is held across it")
+	}
+	close(runtime.blockNetworks)
+	<-done
+}
+
+// countingRuntime records how often each machine was started, and can hold the
+// network calls so a test can act while one is in flight.
+type countingRuntime struct {
+	mu     sync.Mutex
+	counts map[string]int
+
+	networkEntered chan string
+	blockNetworks  chan struct{}
+	networks       atomic.Int32
+
+	// Holding Start is what makes "two at once" a fact rather than a
+	// probability: with a fake driver the first start finishes before the
+	// second looks, so an unserialised pack passes by luck.
+	startEntered chan string
+	blockStarts  chan struct{}
+}
+
+func newCountingRuntime() *countingRuntime {
+	return &countingRuntime{
+		counts:         map[string]int{},
+		networkEntered: make(chan string, 8),
+		startEntered:   make(chan string, 8),
+	}
+}
+
+func (f *countingRuntime) Name() string                   { return "fake" }
+func (f *countingRuntime) Available(context.Context) bool { return true }
+
+func (f *countingRuntime) Start(_ context.Context, spec machine.Spec) (machine.Machine, error) {
+	f.mu.Lock()
+	f.counts[spec.Name]++
+	f.mu.Unlock()
+	if f.blockStarts != nil {
+		select {
+		case f.startEntered <- spec.Name:
+		default:
+		}
+		<-f.blockStarts
+	}
+	return machine.Machine{Name: spec.Name, Running: true}, nil
+}
+
+func (f *countingRuntime) Stop(context.Context, string) error   { return nil }
+func (f *countingRuntime) Remove(context.Context, string) error { return nil }
+
+func (f *countingRuntime) Inspect(_ context.Context, n string) (machine.Machine, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.counts[n] > 0 {
+		// With an address, the way a real runtime answers once the machine is
+		// up. Without one, TestAStoppedVmKeepsItsPrivateAddress skipped itself.
+		return machine.Machine{Name: n, Running: true, IP: "10.99.0.7"}, true, nil
+	}
+	return machine.Machine{}, false, nil
+}
+
+func (f *countingRuntime) EnsureNetwork(_ context.Context, spec machine.NetworkSpec) error {
+	f.networks.Add(1)
+	if f.blockNetworks != nil {
+		select {
+		case f.networkEntered <- spec.Name:
+		default:
+		}
+		<-f.blockNetworks
+	}
+	return nil
+}
+
+func (f *countingRuntime) Attach(context.Context, string, machine.Attachment) error { return nil }
+func (f *countingRuntime) RemoveNetwork(context.Context, string) error              { return nil }
+
+// starts counts by Vm id rather than by machine name, so a test does not have to
+// know the prefix the binding uses.
+func (f *countingRuntime) starts(id string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for name, n := range f.counts {
+		if strings.HasSuffix(name, id) {
+			return n
+		}
+	}
+	return 0
+}
+
+// UpdateVm and a start do not overwrite each other.
+//
+// Commit replaces State, Runtime and Attrs wholesale. Without the per-target
+// lock, an UpdateVm answering 200 wrote its UserData over whatever the start had
+// just committed, or the other way round: the client is told the change landed
+// and the store does not hold it, so Terraform re-proposes it on every plan.
+func TestUpdateVmAndStartVmsDoNotOverwriteEachOther(t *testing.T) {
+	runtime := newCountingRuntime()
+	runtime.blockStarts = make(chan struct{})
+	ts := newRuntimeServer(t, runtime)
+	_, subnetID := netAndSubnet(t, ts, "10.57.0.0/16", "10.57.1.0/24")
+
+	_, out := post(t, ts, "CreateVms",
+		`{"ImageId":"ami-12345678","SubnetId":"`+subnetID+`","BootOnCreation":false}`)
+	vms, _ := out["Vms"].([]any)
+	vm, _ := vms[0].(map[string]any)
+	vmID, _ := vm["VmId"].(string)
+
+	started := make(chan struct{})
+	go func() {
+		defer close(started)
+		post(t, ts, "StartVms", `{"VmIds":["`+vmID+`"]}`)
+	}()
+	<-runtime.startEntered // the start is in the runtime, holding what it holds
+
+	updated := make(chan int, 1)
+	go func() {
+		status, _ := post(t, ts, "UpdateVm", `{"VmId":"`+vmID+`","UserData":"aGVsbG8gd29ybGQ="}`)
+		updated <- status
+	}()
+	// Give the update time to land in the middle if it can.
+	time.Sleep(50 * time.Millisecond)
+	close(runtime.blockStarts)
+	<-started
+	status := <-updated
+
+	if status != http.StatusOK {
+		t.Fatalf("UpdateVm answered %d", status)
+	}
+	// The write it reported must be the write the store holds.
+	_, out = post(t, ts, "ReadVms", `{}`)
+	vms, _ = out["Vms"].([]any)
+	vm, _ = vms[0].(map[string]any)
+	if got, _ := vm["UserData"].(string); got != "aGVsbG8gd29ybGQ=" {
+		t.Errorf("UpdateVm answered 200 and the store holds %q: the write was lost", got)
+	}
+}
+
+// A body the server accepts reaches the handler whole.
+//
+// The DryRun probe reads the body before the handler does, then puts it back.
+// It read a quarter of what emulator.DecodeJSON accepts and restored the
+// truncated copy, so a valid 1.2 MiB request came back as
+// {"Code":"4001","Details":"unexpected end of JSON input"} — a syntax error
+// about a document the client sent whole, introduced by the fix that moved
+// DryRun to the mount point.
+//
+// The probe now uses emulator.MaxBody, the one constant. This test sends more
+// than the old bound and asserts the handler's own verdict: the user data cap,
+// which only a handler that received the whole body can apply.
+func TestABodyTheServerAcceptsReachesTheHandler(t *testing.T) {
+	ts := newServer(t)
+	_, subnetID := netAndSubnet(t, ts, "10.58.0.0/16", "10.58.1.0/24")
+	_, out := post(t, ts, "CreateVms",
+		`{"ImageId":"ami-12345678","SubnetId":"`+subnetID+`","BootOnCreation":false}`)
+	vms, _ := out["Vms"].([]any)
+	vm, _ := vms[0].(map[string]any)
+	vmID, _ := vm["VmId"].(string)
+
+	// Over the old 1 MiB probe, under the 4 MiB the server accepts.
+	body := `{"VmId":"` + vmID + `","UserData":"` + strings.Repeat("A", 1500*1024) + `"}`
+	status, answer := post(t, ts, "UpdateVm", body)
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("a 1.5 MiB request answered %d, want the handler's 400", status)
+	}
+	// The details sit in Errors[0], which is the shape the pack's own error
+	// writer produces; reading them at the root found "" and made this test
+	// fail for the wrong reason.
+	errs, _ := answer["Errors"].([]any)
+	if len(errs) == 0 {
+		t.Fatalf("no Errors in the answer: %v", answer)
+	}
+	first, _ := errs[0].(map[string]any)
+	details, _ := first["Details"].(string)
+	if strings.Contains(details, "unexpected end of JSON input") {
+		t.Errorf("the body was truncated before the handler saw it: %q", details)
+	}
+	// The verdict must be the handler's own, which only a whole body produces.
+	if !strings.Contains(details, "UserData") {
+		t.Errorf("the answer is not the handler's verdict on the field: %q", details)
+	}
+}
+
+// A filter this pack does not apply is refused, not ignored.
+//
+// The API description declares 66 filters on a Vm and the pack read one. Every
+// other one returned the whole inventory with a 200: an audit sent
+// `--Filters.SubnetIds[] subnet-deadbeef` against seven machines and got all
+// seven back. A script that deletes what a filter matched would have deleted
+// everything, and nothing in the answer would have said so.
+func TestAnUnsupportedFilterIsRefused(t *testing.T) {
+	ts := newServer(t)
+	_, subnetID := netAndSubnet(t, ts, "10.60.0.0/16", "10.60.1.0/24")
+	post(t, ts, "CreateVms", `{"ImageId":"ami-12345678","SubnetId":"`+subnetID+`","BootOnCreation":false}`)
+
+	for _, probe := range []struct{ action, body string }{
+		{"ReadVms", `{"Filters":{"Architectures":["x86_64"]}}`},
+		{"ReadVms", `{"Filters":{"Tags":["a=b"]}}`},
+		{"ReadNets", `{"Filters":{"DhcpOptionsSetIds":["dopt-1"]}}`},
+		{"ReadSubnets", `{"Filters":{"SubregionNames":["eu-west-2a"]}}`},
+		{"ReadKeypairs", `{"Filters":{"TagKeys":["env"]}}`},
+	} {
+		status, out := post(t, ts, probe.action, probe.body)
+		if status == http.StatusOK {
+			t.Errorf("%s applied nothing and answered 200 for %s: %v", probe.action, probe.body, out)
+			continue
+		}
+		// The refusal has to name the field, or a caller cannot act on it.
+		errs, _ := out["Errors"].([]any)
+		if len(errs) == 0 {
+			t.Errorf("%s refused without saying why: %v", probe.action, out)
+			continue
+		}
+		first, _ := errs[0].(map[string]any)
+		details, _ := first["Details"].(string)
+		if !strings.Contains(details, "filter") {
+			t.Errorf("%s: the refusal does not mention the filter: %q", probe.action, details)
+		}
+	}
+}
+
+// The filters that are served actually filter.
+//
+// A guard that refuses everything passes every attack test and breaks the
+// product, so the accepting half is asserted too — and each filter is asserted
+// on a value that exists and one that does not, because a filter that always
+// matches and a filter that never matches are equally useless.
+func TestTheServedFiltersFilter(t *testing.T) {
+	ts := newServer(t)
+	_, subnetID := netAndSubnet(t, ts, "10.61.0.0/16", "10.61.1.0/24")
+	_, out := post(t, ts, "CreateVms",
+		`{"ImageId":"ami-11111111","SubnetId":"`+subnetID+`","VmType":"tinav6.c2r2p2","BootOnCreation":false}`)
+	vms, _ := out["Vms"].([]any)
+	vm, _ := vms[0].(map[string]any)
+	vmID, _ := vm["VmId"].(string)
+	post(t, ts, "CreateVms", `{"ImageId":"ami-22222222","SubnetId":"`+subnetID+`","BootOnCreation":false}`)
+
+	count := func(body string) int {
+		_, out := post(t, ts, "ReadVms", body)
+		vms, _ := out["Vms"].([]any)
+		return len(vms)
+	}
+	if n := count(`{}`); n != 2 {
+		t.Fatalf("no filter returned %d machines, want 2", n)
+	}
+	for _, probe := range []struct {
+		body string
+		want int
+	}{
+		{`{"Filters":{"VmIds":["` + vmID + `"]}}`, 1},
+		{`{"Filters":{"VmIds":["i-does-not-exist"]}}`, 0},
+		{`{"Filters":{"ImageIds":["ami-11111111"]}}`, 1},
+		{`{"Filters":{"ImageIds":["ami-99999999"]}}`, 0},
+		{`{"Filters":{"VmTypes":["tinav6.c2r2p2"]}}`, 1},
+		{`{"Filters":{"SubnetIds":["` + subnetID + `"]}}`, 2},
+		{`{"Filters":{"SubnetIds":["subnet-deadbeef"]}}`, 0},
+		{`{"Filters":{"VmStates":["stopped"]}}`, 2},
+		{`{"Filters":{"VmStates":["running"]}}`, 0},
+		// Conjunctive, like upstream: both must hold.
+		{`{"Filters":{"ImageIds":["ami-11111111"],"VmTypes":["tinav6.c2r2p2"]}}`, 1},
+		{`{"Filters":{"ImageIds":["ami-11111111"],"VmTypes":["nope"]}}`, 0},
+	} {
+		if n := count(probe.body); n != probe.want {
+			t.Errorf("%s returned %d machine(s), want %d", probe.body, n, probe.want)
+		}
+	}
+
+	// And an empty filter list matches nothing rather than everything: asking
+	// for none of a set is not asking for all of it.
+	if n := count(`{"Filters":{"VmIds":[]}}`); n != 0 {
+		t.Errorf("an empty VmIds matched %d machine(s), want 0", n)
+	}
+}
+
+// The fingerprint is the one ssh-keygen prints.
+//
+// It was computed over the whole line — algorithm prefix and comment included —
+// so it matched nothing a client could reproduce, and renaming the comment
+// changed the fingerprint of the same key. The value below comes from
+// `ssh-keygen -l -E md5` on the key above, which is the only authority that
+// settles it.
+func TestTheFingerprintIsTheOneSshKeygenPrints(t *testing.T) {
+	const (
+		key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIr6pEFlAFO3YU0DNW/r8SkpjdbptN9ockkO2BtIolSD conformance@feint"
+		want = "6b:d8:0e:65:b1:58:fd:61:94:3a:b3:42:e6:e1:2c:01"
+	)
+	ts := newServer(t)
+	_, out := post(t, ts, "CreateKeypair", `{"KeypairName":"real","PublicKey":`+quote(key)+`}`)
+	pair, _ := out["Keypair"].(map[string]any)
+	if pair == nil {
+		t.Fatalf("no keypair in the answer: %v", out)
+	}
+	if got, _ := pair["KeypairFingerprint"].(string); got != want {
+		t.Errorf("fingerprint %q, want the one ssh-keygen prints (%q)", got, want)
+	}
+	// And the type is the key's own, not a constant: every key used to answer
+	// ssh-rsa, ed25519 ones included.
+	if got, _ := pair["KeypairType"].(string); got != "ssh-ed25519" {
+		t.Errorf("KeypairType %q for an ed25519 key", got)
+	}
+	// The comment must not reach the fingerprint: the same key renamed is the
+	// same key.
+	renamed := strings.Replace(key, "conformance@feint", "someone@else", 1)
+	_, out = post(t, ts, "CreateKeypair", `{"KeypairName":"renamed","PublicKey":`+quote(renamed)+`}`)
+	pair, _ = out["Keypair"].(map[string]any)
+	if got, _ := pair["KeypairFingerprint"].(string); got != want {
+		t.Errorf("renaming the comment changed the fingerprint: %q", got)
+	}
+}
+
+// A legitimate DryRun: false does not fail the conformance gate.
+//
+// Outscale declares DryRun on all twenty of its actions and this pack answers it
+// at the mount point, so no handler decodes it. The unread-field report
+// therefore counted it as a field nobody read, and `tools/conformance/score.sh`
+// turns that list into exit 1: a request every client is entitled to send failed
+// this project's own gate. It went unnoticed only because no script sent the
+// flag.
+//
+// The fix must not be to declare DryRun on twenty request structs — that
+// quietens the report by lying to it, since the handlers still would not read
+// it. The middleware says what it read instead.
+func TestDryRunFalseDoesNotFailTheGate(t *testing.T) {
+	env := emulator.DefaultEnv()
+	env.Contracts = map[string]*contract.Doc{"outscale": outscaleContract(t)}
+	srv, err := emulator.NewServer(env, outscale.New(env))
+	if err != nil {
+		t.Fatalf("build emulator: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	if status, _ := post(t, ts, "ReadVms", `{"DryRun":false}`); status != http.StatusOK {
+		t.Fatalf("ReadVms with DryRun false answered %d", status)
+	}
+
+	res, err := http.Get(ts.URL + "/_feint/conformance") //nolint:noctx // test client
+	if err != nil {
+		t.Fatalf("read the conformance report: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	var report struct {
+		Unread map[string][]string `json:"unread_request_fields"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&report); err != nil {
+		t.Fatalf("decode the report: %v", err)
+	}
+	for operation, fields := range report.Unread {
+		for _, field := range fields {
+			if field == "DryRun" {
+				t.Errorf("%s reports DryRun as unread, which fails score.sh for a legitimate request", operation)
+			}
+		}
+	}
+}
+
+// outscaleContract loads the API description this pack ships against, the way
+// the observer does in a real run.
+func outscaleContract(t *testing.T) *contract.Doc {
+	t.Helper()
+	doc, err := contract.Load(filepath.Join("..", "..", "..", "contracts", "outscale.json"))
+	if err != nil {
+		t.Fatalf("load the Outscale contract: %v", err)
+	}
+	return doc
+}
+
+// A stopped Vm keeps its private address.
+//
+// PowerOff clears the runtime binding's address, correctly, since nothing
+// answers there any more. A Vm placed in a Subnet was unaffected — its address
+// lives in Attrs — and a Vm created without one lost it: one field, two
+// behaviours. Terraform reading private_ip saw null after a stop, and Outscale
+// keeps the address until the machine is terminated.
+func TestAStoppedVmKeepsItsPrivateAddress(t *testing.T) {
+	runtime := newCountingRuntime()
+	ts := newRuntimeServer(t, runtime)
+
+	// No Subnet: this is the case that had the address only in the binding.
+	_, out := post(t, ts, "CreateVms", `{"ImageId":"ami-12345678"}`)
+	vms, _ := out["Vms"].([]any)
+	vm, _ := vms[0].(map[string]any)
+	vmID, _ := vm["VmId"].(string)
+	// Published on the read, the way a virtual machine's address is: it arrives
+	// tens of seconds after the start, so the create cannot carry it.
+	_, out = post(t, ts, "ReadVms", `{"Filters":{"VmIds":["`+vmID+`"]}}`)
+	vms, _ = out["Vms"].([]any)
+	vm, _ = vms[0].(map[string]any)
+	running, _ := vm["PrivateIp"].(string)
+	if running == "" {
+		t.Fatalf("the running Vm publishes no address, so this test measures nothing: %v", vm)
+	}
+
+	post(t, ts, "StopVms", `{"VmIds":["`+vmID+`"]}`)
+	_, out = post(t, ts, "ReadVms", `{"Filters":{"VmIds":["`+vmID+`"]}}`)
+	vms, _ = out["Vms"].([]any)
+	vm, _ = vms[0].(map[string]any)
+	if stopped, _ := vm["PrivateIp"].(string); stopped != running {
+		t.Errorf("a stopped Vm answers PrivateIp %q, want the %q it had running", stopped, running)
+	}
 }

@@ -12,9 +12,15 @@ import (
 	"sync"
 )
 
-// maxBody caps request bodies. The emulator only ever receives control-plane
+// MaxBody caps request bodies. The emulator only ever receives control-plane
 // payloads; anything larger is a client bug or an attempt to exhaust memory.
-const maxBody = 4 << 20
+//
+// Exported because a pack that reads a body before the decoder does — the
+// Outscale DryRun probe — has to use the same number. It used its own, one
+// quarter of this one, and put the truncated body back for the handler: a valid
+// 1.2 MiB request came out as "unexpected end of JSON input". Two constants for
+// one limit is how they disagree.
+const MaxBody = 4 << 20
 
 // writeJSON serializes v with the given status. Encoding errors are not
 // reported to the client: the status line is already written by then, so the
@@ -44,7 +50,7 @@ func WriteJSON(w http.ResponseWriter, status int, v any) { writeJSON(w, status, 
 // to thread a value none of them care about. The report travels on the request
 // context, put there by the observer.
 func DecodeJSON(r *http.Request, v any) error {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBody))
 	if err != nil {
 		return err
 	}
@@ -60,10 +66,40 @@ func DecodeJSON(r *http.Request, v any) error {
 	return nil
 }
 
+// MarkRead records that something outside the handler's own request type read a
+// field, so the report stops calling it unread.
+//
+// It exists for one shape: a value consumed before the handler runs. Outscale
+// declares DryRun on all twenty of its actions and answers it at the mount
+// point, so no handler decodes it — which made `DryRun: false` count as a field
+// no handler read, and a perfectly legitimate request fail this project's own
+// conformance gate. Declaring the field on twenty request structs instead would
+// have quietened the report by lying to it: the handlers still would not read
+// it.
+//
+// It is deliberately narrow. A pack that calls this for a field it simply
+// ignores has disabled the check that exists to catch exactly that, so the call
+// belongs next to the code that does the reading, and nowhere else.
+func MarkRead(r *http.Request, fields ...string) {
+	rep, watching := r.Context().Value(reportKey{}).(*requestReport)
+	if !watching {
+		return
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	if rep.read == nil {
+		rep.read = make(map[string]bool, len(fields))
+	}
+	for _, field := range fields {
+		rep.read[field] = true
+	}
+}
+
 // requestReport collects what one request turned out to carry and nobody read.
 type requestReport struct {
 	mu     sync.Mutex
 	unread []string
+	read   map[string]bool
 }
 
 // reportKey is the private context key the observer files a report under.
@@ -86,7 +122,13 @@ func (rep *requestReport) add(fields []string) {
 func (rep *requestReport) fields() []string {
 	rep.mu.Lock()
 	defer rep.mu.Unlock()
-	return append([]string(nil), rep.unread...)
+	out := make([]string, 0, len(rep.unread))
+	for _, field := range rep.unread {
+		if !rep.read[field] {
+			out = append(out, field)
+		}
+	}
+	return out
 }
 
 // unreadFields lists the JSON keys the body carries that v's type does not

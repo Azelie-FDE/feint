@@ -57,11 +57,13 @@ func (p *Pack) Name() string { return Name }
 // keys on, which is why both live one string apart.
 func operation(action string) string { return "osc/Client." + action }
 
-// route declares one action. Outscale has no path structure to speak of: every
 // maxDryRunProbe bounds the body read to answer a dry run. Generous for a
-// request document and far below the 4 MiB the server accepts.
-const maxDryRunProbe = 1 << 20
+// request document, and matched to what the server accepts rather than chosen
+// below it: the probe puts the body back for the handler, so a smaller bound
+// here truncated real requests.
+const maxDryRunProbe = emulator.MaxBody
 
+// route declares one action. Outscale has no path structure to speak of: every
 // call is a POST on /api/v1/<Action>, so a route is fully described by its
 // action name and its handler.
 func (p *Pack) route(action string, handler http.HandlerFunc) emulator.Route {
@@ -91,6 +93,11 @@ func (p *Pack) route(action string, handler http.HandlerFunc) emulator.Route {
 // TestDryRunReachesNoHandler fails without this.
 func (p *Pack) dryRunnable(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Read here rather than by a handler, so the unread-field report is
+		// told: otherwise `DryRun: false` — a legitimate request every client
+		// can send — counted as a field nobody read and failed the conformance
+		// gate. TestDryRunFalseDoesNotFailTheGate holds it.
+		emulator.MarkRead(r, "DryRun")
 		// Bounded like every other body: a dry run must not be a way to make the
 		// emulator read an unbounded request.
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxDryRunProbe))
