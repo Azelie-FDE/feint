@@ -89,7 +89,7 @@ printf '%s' "$keys_before" | jq -e 'length == 0' >/dev/null \
 # anybody holds. The fingerprint must be computed from the blob rather than
 # invented: a client comparing it against ssh-keygen -l -E md5 would catch it.
 cat > "$WORK/key.pub" <<'KEY'
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyForConformance conformance@feint
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIr6pEFlAFO3YU0DNW/r8SkpjdbptN9ockkO2BtIolSD conformance@feint
 KEY
 exoc compute ssh-key register conformance "$WORK/key.pub" >/dev/null \
   || fail "ssh-key register rejected"
@@ -98,6 +98,20 @@ printf '%s' "$keys" | jq -e 'any(.[]; .name == "conformance" and (.fingerprint |
   || fail "the registered key came back without a fingerprint: $keys"
 exoc -Q compute ssh-key delete conformance --force >/dev/null || fail "ssh-key delete rejected"
 ok "registered with a computed fingerprint, and removed"
+
+echo "- the limits a client reads, counted rather than invented"
+# The CLI relabels what the API returns — "instance" becomes "Compute
+# instances", usage becomes used — so the assertion is on what the client
+# prints, which is the only thing a user sees.
+limits="$(exoc -O json limits)" || fail "exo limits rejected: $limits"
+printf '%s' "$limits" | jq -e 'any(.[]; .resource == "Compute instances")' >/dev/null \
+  || fail "no instance quota in the limits: $limits"
+used_before="$(printf '%s' "$limits" | jq -r '.[] | select(.resource == "Compute instances") | .used')"
+if [ "$used_before" = "0" ]; then
+  ok "limits served, no instance in use yet"
+else
+  fail "a fresh account already uses $used_before instance(s)"
+fi
 
 echo "- create, from the catalogue the emulator just published"
 exoc compute instance create conformance \

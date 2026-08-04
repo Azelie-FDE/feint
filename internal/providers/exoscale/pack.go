@@ -14,8 +14,10 @@ package exoscale
 
 import (
 	"net/http"
+	"os"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/stephrobert/feint/internal/core/cloudinit"
@@ -55,7 +57,7 @@ func operation(id string) string { return "exoscale/v2." + id }
 
 // Routes implements emulator.Pack.
 func (p *Pack) Routes() []emulator.Route {
-	return []emulator.Route{
+	return p.guardSplitClients([]emulator.Route{
 		{Method: "GET", Path: "/v2/instance", Operation: operation("list-instances"), Handler: p.listInstances},
 		{Method: "POST", Path: "/v2/instance", Operation: operation("create-instance"), Handler: p.createInstance},
 		{Method: "GET", Path: "/v2/instance/{id}", Operation: operation("get-instance"), Handler: p.getInstance},
@@ -74,9 +76,14 @@ func (p *Pack) Routes() []emulator.Route {
 		// registers one of its own before it posts the instance.
 		{Method: "POST", Path: "/v2/ssh-key", Operation: operation("register-ssh-key"), Handler: p.registerSSHKey},
 		{Method: "GET", Path: "/v2/ssh-key", Operation: operation("list-ssh-keys"), Handler: p.listSSHKeys},
+
+		// Quotas, which `exo limits` reads. See catalog.go for why they are
+		// counted rather than invented.
+		{Method: "GET", Path: "/v2/quota", Operation: operation("list-quotas"), Handler: p.listQuotas},
+		{Method: "GET", Path: "/v2/quota/{name}", Operation: operation("get-quota"), Handler: p.getQuota},
 		{Method: "GET", Path: "/v2/ssh-key/{name}", Operation: operation("get-ssh-key"), Handler: p.getSSHKey},
 		{Method: "DELETE", Path: "/v2/ssh-key/{name}", Operation: operation("delete-ssh-key"), Handler: p.deleteSSHKey},
-	}
+	})
 }
 
 // Declined implements emulator.Pack.
@@ -379,12 +386,10 @@ func (p *Pack) Declined() []emulator.Decline {
 		// The organisation's own consumption: balance, usage, environmental
 		// impact.
 		//
-		// Quotas are deliberately NOT here, and neither is the organisation
-		// itself. An audit caught them swept in: docs/roadmap-exoscale-iaas.md
-		// keeps them in scope as small read-only calls several clients make, and
-		// `exo limits` — a first-class command of the official CLI — died on the
-		// refusal. A quota is a limit this emulator can state as its own claim,
-		// the way it already states a catalogue.
+		// Quotas are not here because they are served now: `exo limits` reads
+		// them, and it died on a 404 for two releases. A quota is a limit this
+		// emulator can state as its own claim, the way it states a catalogue,
+		// and a usage it can count. The organisation itself is still not here.
 		emulator.Because("there is no account behind this emulator and no consumption to report, so any figure here would be one it invented and somebody planned against",
 			"exoscale/v2.get-env-impact",
 			"exoscale/v2.get-impact-estimate",
@@ -392,6 +397,54 @@ func (p *Pack) Declined() []emulator.Decline {
 			"exoscale/v2.get-live-balance",
 			"exoscale/v2.get-usage-report"),
 	)
+}
+
+// guardSplitClients refuses a client this emulator can only half serve.
+//
+// The Terraform provider honours EXOSCALE_API_ENDPOINT for its egoscale v3
+// client and builds a v2 client with no endpoint option at all. So an apply
+// does not fail and does not work: it splits. Some resources answer from here,
+// and the rest are created on the real cloud, in one run, with whatever
+// credentials the environment holds. Measured on 0.70.0, with outbound traffic
+// routed to a proxy that was not listening: `exoscale_ssh_key` tried
+// `https://api-ch-gva-2.exoscale.com/v2/ssh-key` with the variable set.
+//
+// Half-serving that client is the worst of the three outcomes. A clean refusal
+// tells the operator what is happening, at the moment it happens, in the
+// client's own dialect; a half-success is indistinguishable from working until
+// the invoice.
+//
+// The escape hatch is named rather than hidden: someone who understands the
+// split and wants the v3 half anyway sets FEINT_EXOSCALE_ALLOW_TERRAFORM=1, and
+// owns what the other half does. A guard with no way past it gets worked around
+// by copying the emulator, which teaches nothing.
+//
+// TestTheTerraformProviderIsRefused fails without this.
+func (p *Pack) guardSplitClients(routes []emulator.Route) []emulator.Route {
+	for i := range routes {
+		handler := routes[i].Handler
+		routes[i].Handler = func(w http.ResponseWriter, r *http.Request) {
+			if splitClient(r.UserAgent()) && os.Getenv("FEINT_EXOSCALE_ALLOW_TERRAFORM") == "" {
+				writeError(w, http.StatusBadRequest,
+					"the Exoscale Terraform provider only honours EXOSCALE_API_ENDPOINT for half of "+
+						"its calls: the rest reach the real cloud and create billable resources. "+
+						"feint refuses rather than serve half an apply. Set "+
+						"FEINT_EXOSCALE_ALLOW_TERRAFORM=1 if you understand that and want the half "+
+						"it can serve. See docs/limits.md.")
+				return
+			}
+			handler(w, r)
+		}
+	}
+	return routes
+}
+
+// splitClient recognises the Terraform provider by the user agent it sets
+// itself: `Exoscale-Terraform-Provider/<version> …`. The exo CLI sends its own
+// and is served normally, which is the point — this refuses one client, not a
+// product.
+func splitClient(userAgent string) bool {
+	return strings.Contains(userAgent, "Exoscale-Terraform-Provider")
 }
 
 // apiPrefix is the whole of Exoscale's URL space here: their API description
@@ -438,9 +491,39 @@ type createInstanceRequest struct {
 	SSHKeys []struct {
 		Name string `json:"name"`
 	} `json:"ssh-keys"`
+	// The singular form, which their API documents beside the plural — "Instance
+	// SSH Key" and "Instance SSH Keys" — with neither deprecated. Reading only
+	// the plural meant a client sending one key had it accepted and dropped, and
+	// the machine then booted with no key at all.
+	//
+	// TestExoscaleReadsBothKeyForms fails without this.
+	SSHKey *struct {
+		Name string `json:"name"`
+	} `json:"ssh-key"`
 	PublicIPAssignment string `json:"public-ip-assignment"`
 	SecurebootEnabled  *bool  `json:"secureboot-enabled"`
 	TPMEnabled         *bool  `json:"tpm-enabled"`
+}
+
+// keyNames gathers both forms the API accepts, in the order the client sent
+// them, without repeating a name given twice.
+func (r createInstanceRequest) keyNames() []string {
+	seen := make(map[string]bool, len(r.SSHKeys)+1)
+	var names []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	if r.SSHKey != nil {
+		add(r.SSHKey.Name)
+	}
+	for _, key := range r.SSHKeys {
+		add(key.Name)
+	}
+	return names
 }
 
 func (p *Pack) listInstances(w http.ResponseWriter, r *http.Request) {
@@ -469,6 +552,29 @@ func (p *Pack) createInstance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	// What contracts/exoscale.json declares required, and what the pack checked
+	// none of: an instance created with only a name answered 200 with
+	// template {"id": ""} and instance-type {"id": ""}, and `exo compute
+	// instance list` then stopped listing at it — four instances in the store,
+	// one in the CLI's answer. docs/limits.md accepts *plausible but unknown*
+	// ids; an absent reference is a different class, and upstream refuses it.
+	//
+	// TestExoscaleRefusesAnIncompleteCreate fails without this.
+	switch {
+	case req.Template.ID == "":
+		writeError(w, http.StatusBadRequest, "template is required")
+		return
+	case req.InstanceType.ID == "":
+		writeError(w, http.StatusBadRequest, "instance-type is required")
+		return
+	case req.DiskSize <= 0:
+		writeError(w, http.StatusBadRequest, "disk-size is required")
+		return
+	}
+	if strings.ContainsAny(req.Name, "\n\r\x00") {
+		writeError(w, http.StatusBadRequest, "name carries control characters")
+		return
+	}
 	if len(req.UserData) > cloudinit.MaxUserData {
 		writeError(w, http.StatusBadRequest, "user-data is limited to 500 kibibytes")
 		return
@@ -490,7 +596,7 @@ func (p *Pack) createInstance(w http.ResponseWriter, r *http.Request) {
 			// Echoed back because a client that attached them expects to read
 			// them, and because their absence is not "no keys" to a client, it
 			// is a missing field.
-			"ssh-keys":             p.sshKeyRefs(req.SSHKeys),
+			"ssh-keys":             p.sshKeyRefs(req.keyNames()),
 			"public-ip-assignment": orDefault(req.PublicIPAssignment, "inet4"),
 			"secureboot-enabled":   boolOr(req.SecurebootEnabled, false),
 			"tpm-enabled":          boolOr(req.TPMEnabled, false),
@@ -634,16 +740,14 @@ func (p *Pack) view(res *resource.Resource) map[string]any {
 // fingerprint is looked up rather than invented, and a key the account does not
 // hold keeps its name with an empty fingerprint instead of vanishing — dropping
 // it would tell the client its request was ignored.
-func (p *Pack) sshKeyRefs(requested []struct {
-	Name string `json:"name"`
-}) []any {
+func (p *Pack) sshKeyRefs(requested []string) []any {
 	out := make([]any, 0, len(requested))
-	for _, want := range requested {
+	for _, name := range requested {
 		fingerprint := ""
-		if res, ok := p.env.Store.Get(Name, kindSSHKey, want.Name); ok {
+		if res, ok := p.env.Store.Get(Name, kindSSHKey, name); ok {
 			fingerprint, _ = res.Attrs["fingerprint"].(string)
 		}
-		out = append(out, map[string]any{"name": want.Name, "fingerprint": fingerprint})
+		out = append(out, map[string]any{"name": name, "fingerprint": fingerprint})
 	}
 	return out
 }
@@ -687,16 +791,45 @@ func writeError(w http.ResponseWriter, status int, message string) {
 // Env implements emulator.Pack.
 //
 // This is the provider where an environment is not enough, and the Note field
-// exists because of it. Measured with a logging proxy: the official exo CLI
-// reads no endpoint variable at all. It can only be redirected through the
-// `endpoint` key of its own configuration file, and that value must carry the
-// /v2 suffix because the CLI concatenates it with the route it wants rather than
-// adding a version segment of its own.
+// exists because of it. Both halves of what this comment used to say were
+// measured, and both had become false in opposite directions.
 //
-// EXOSCALE_API_ENDPOINT is exported anyway: the Terraform provider does read it.
-// Handing a user variables that work for one client and not another, without
-// saying which, is the kind of half-answer this project exists to avoid — so the
-// note goes to stderr, where `eval` cannot swallow it.
+// The exo CLI *does* read EXOSCALE_API_ENDPOINT. That was reported by a
+// contributor in #51, with the line of their source that reads it, and verified
+// here in both directions on exo 1.95.1: pointed at the emulator it drives it,
+// pointed at a dead port it fails naming that port. The older claim came from a
+// logging proxy, and describes a version that no longer matters.
+//
+// The Terraform provider reads it for half of itself, which is worse than
+// either answer. exoscale/exoscale 0.70.0 builds two clients in
+// pkg/provider/provider.go: an egoscale v3 one, where the variable is honoured
+//
+//	if ep := os.Getenv("EXOSCALE_API_ENDPOINT"); ep != "" {
+//		opts = append(opts, exov3.ClientOptWithEndpoint(exov3.Endpoint(ep)), …)
+//	}
+//
+// and an egoscale v2 one, created with no endpoint option at all. Whatever a
+// resource reaches through v2 goes to the real cloud: an audit watched
+// `terraform apply` send GET api-ch-dk-2.exoscale.com/v2/template and POST
+// api-ch-gva-2.exoscale.com/v2/ssh-key with the variable set, and
+// `https://api-ch-gva-2.exoscale.com/v2` is compiled into the binary.
+//
+// So a plan does not fail cleanly, it splits: some resources answer from the
+// emulator and some are created for real, in one apply. That is the dangerous
+// shape, and it is what the note says. A user who runs
+// `eval "$(feint env exoscale)"` with real credentials still in their
+// environment, and then `terraform apply`, creates billable resources while
+// believing they drive an emulator. Only the fake credentials' bad signature
+// stopped it when it was measured. tools/conformance/guard.sh exists because a
+// version of this accident already happened to this repository.
+//
+// Both earlier versions of this comment were wrong, in opposite directions, and
+// each was written from one measurement: a logging proxy said the CLI reads
+// nothing, an audit said Terraform reaches the real cloud. Their provider's own
+// source settles it, which is what CLAUDE.md says to read when a client
+// surprises you.
+//
+// TestEnvSendsItsNoteToStderr in internal/cli fails without the warning.
 func (p *Pack) Env(endpoint string) emulator.Environment {
 	return emulator.Environment{
 		Vars: map[string]string{
@@ -705,7 +838,10 @@ func (p *Pack) Env(endpoint string) emulator.Environment {
 			"EXOSCALE_API_ENDPOINT": endpoint + apiPrefix,
 			"EXOSCALE_ZONE":         zoneName,
 		},
-		Note: "the exo CLI ignores these: it takes its endpoint only from its config file, " +
-			"where `endpoint` must be " + endpoint + apiPrefix + " — see tools/conformance/exoscale/exo-cli.sh.",
+		Note: "the exo CLI reads these. The Terraform provider only half does: it honours " +
+			"EXOSCALE_API_ENDPOINT for its egoscale v3 client and not for its v2 one, so an " +
+			"apply splits between this emulator and the real cloud — with real credentials in " +
+			"your environment it will create billable resources. Do not point terraform at " +
+			"Exoscale here. See docs/limits.md.",
 	}
 }
