@@ -116,6 +116,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return waitCommand(args[2:], stdout, stderr)
 	case "status":
 		return status(args[2:], stdout, stderr)
+	case "ui":
+		return uiCommand(args[2:], stdout, stderr)
 	case "logs":
 		return logs(args[2:], stdout, stderr)
 	case "env":
@@ -156,7 +158,7 @@ func usage(w io.Writer) {
 
 Usage:
   feint serve      [--addr 127.0.0.1:4599] [--state <file>] [--vm off|incus|incus-vm|incus-ovn|auto]
-                    [--cleanup] [--contracts <dir>] [--log-level info|debug]
+                    [--cleanup] [--contracts <dir>] [--coverage <dir>] [--log-level info|debug]
                     Serve the three emulated clouds on one port, in the
                     foreground.
 
@@ -180,6 +182,11 @@ Usage:
                     What is running, what it mounts, what a real client has
                     driven this run, and how much of the upstream surface is
                     served.
+
+  feint ui         [--addr :4599] [--print]
+                    Open the emulator's own page: served against driven against
+                    probed, the gap with the upstream API, and a live log of the
+                    calls. Read-only, and served on loopback only.
 
   feint logs       [--addr :4599] [-n 50] [-f]
                     The detached run's log.
@@ -395,6 +402,7 @@ func serve(args []string, stdout io.Writer) error {
 	cleanup := fs.Bool("cleanup", false, "remove the machines and networks this run created before exiting")
 	logLevel := fs.String("log-level", "info", "log verbosity: error, warn, info, debug")
 	contracts := fs.String("contracts", "", "directory of API contracts; every response is checked against them and /_feint/conformance reports what failed")
+	coverageDir := fs.String("coverage", "coverage", "directory holding the versioned coverage artefacts the page reads")
 	expose := fs.Bool("expose-to-network", false, "listen off loopback, which disarms the browser guard: read what it costs before setting it")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -439,7 +447,7 @@ func serve(args []string, stdout io.Writer) error {
 	defer stopWatching()
 	if watcher, ok := driver.(machine.Watcher); ok {
 		if events, err := watcher.Watch(watchCtx); err == nil {
-			go reportRuntimeEvents(events, env.Log)
+			go reportRuntimeEvents(events, env.Log, srv)
 		} else {
 			env.Log.Warn("could not watch the machine runtime", "error", err)
 		}
@@ -478,6 +486,14 @@ func serve(args []string, stdout io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Mounted here, where the listen address is known, and only when that address
+	// keeps the emulator on this machine. Off loopback the page does not exist:
+	// the browser guard can no longer tell a local page from a hostile one, and a
+	// dashboard that drives a container runtime is not something to leave
+	// reachable by name. TestThePageIsNotServedOffLoopback in the emulator
+	// package fails without that.
+	page := srv.MountUI(emulator.UI{Addr: *addr, Version: released(), Upstream: upstreamGap(*coverageDir)})
+
 	errs := make(chan error, 1)
 	go func() {
 		fmt.Fprintf(stdout, "feint %s listening on %s\n", Version, *addr)
@@ -485,6 +501,9 @@ func serve(args []string, stdout io.Writer) error {
 			fmt.Fprintf(stdout, "  %-9s %d routes\n", p.Name(), len(p.Routes()))
 		}
 		fmt.Fprintf(stdout, "  machines  %s\n", env.Machines.Name())
+		if page {
+			fmt.Fprintf(stdout, "  page      http://%s/_feint/ui\n", *addr)
+		}
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs <- err
 		}
@@ -762,7 +781,11 @@ func catalog(args []string, stdout io.Writer) error {
 // Levels are mapped rather than copied: a runtime warning about a resource the
 // emulator created is worth an operator's attention, and a lifecycle change is
 // not, which is why the latter is debug.
-func reportRuntimeEvents(events <-chan machine.Event, log *slog.Logger) {
+// The server is the second reader: what the runtime says about a machine the
+// emulator created belongs on the same timeline as the calls that created it. An
+// operator reading "the server is running" needs to see the container behind it
+// stop, and until now that only reached the process log at debug level.
+func reportRuntimeEvents(events <-chan machine.Event, log *slog.Logger, srv *emulator.Server) {
 	// Consecutive duplicates are dropped: the daemon logs its teardown race
 	// once per concurrent list, so a single stop raced by a watcher produces
 	// tens of identical lines in a second, and the repetition carries nothing.
@@ -773,6 +796,9 @@ func reportRuntimeEvents(events <-chan machine.Event, log *slog.Logger) {
 			continue
 		}
 		lastKey = key
+		if srv != nil {
+			srv.PublishRuntimeEvent(event.Kind, event.Level, event.Action, event.Resource, event.Message)
+		}
 		switch {
 		case event.Kind == "lifecycle":
 			log.Debug("runtime "+event.Action, "resource", event.Resource)

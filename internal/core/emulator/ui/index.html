@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<title>feint</title>
+<link rel="stylesheet" href="/_feint/ui/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230e7f68'/%3E%3Cpath d='M9 23 L23 9 M15 9 h8 v8' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="wordmark">feint</span>
+    <span class="chip" id="version" title="the version of the binary serving this page">dev</span>
+  </div>
+  <div class="facts">
+    <span class="fact"><span class="key">endpoint</span> <span class="val mono" id="endpoint">&mdash;</span></span>
+    <span class="sep" aria-hidden="true"></span>
+    <span class="fact"><span class="key">machines</span> <span class="val mono" id="driver">&mdash;</span></span>
+    <span class="sep" aria-hidden="true"></span>
+    <span class="fact"><span class="key">resources</span> <span class="val mono" id="resources">&mdash;</span></span>
+  </div>
+  <div class="controls">
+    <span class="health" id="health" data-state="waiting">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="health-text">connecting</span>
+    </span>
+    <button type="button" id="theme" class="ghost" title="light, dark, or follow the system">theme: auto</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- What no other tool here shows: three numbers side by side, never added up. -->
+  <section class="card span-2" id="proof-card">
+    <div class="card-head">
+      <h2>what a real client has driven</h2>
+      <span class="hint">a probe proves the protocol, never the behaviour</span>
+    </div>
+
+    <p class="headline"><span class="big mono" id="served">&mdash;</span> <span class="unit">routes mounted</span></p>
+
+    <div class="meter" id="meter" role="img" aria-label="routes driven, probed and never proven">
+      <span class="seg driven" id="seg-driven"></span>
+      <span class="seg probed" id="seg-probed"></span>
+    </div>
+
+    <!-- Every number here opens. A count nobody can unfold sends the reader to a
+         Go file, which is the gesture this page exists to remove. -->
+    <ul class="legend">
+      <li><button type="button" class="legend-open" id="open-driven" data-group="driven" aria-expanded="false" aria-controls="proof-drill">
+        <span class="swatch driven" aria-hidden="true"></span><b class="mono" id="n-driven">&mdash;</b> driven by a real client</button></li>
+      <li><button type="button" class="legend-open" id="open-probed" data-group="probed" aria-expanded="false" aria-controls="proof-drill">
+        <span class="swatch probed" aria-hidden="true"></span><b class="mono" id="n-probed">&mdash;</b> probed, behaviour unproven</button></li>
+      <li><button type="button" class="legend-open" id="open-unproven" data-group="unproven" aria-expanded="false" aria-controls="proof-drill">
+        <span class="swatch unproven" aria-hidden="true"></span><b class="mono" id="n-unproven">&mdash;</b> never proven</button></li>
+    </ul>
+
+    <div class="drill" id="proof-drill" hidden>
+      <div class="drill-head">
+        <span class="drill-title" id="proof-drill-title"></span>
+        <input type="search" id="proof-drill-filter" class="search" placeholder="filter these operations" autocomplete="off" spellcheck="false">
+        <button type="button" id="proof-drill-close" class="ghost">close</button>
+      </div>
+      <ol class="op-list" id="proof-drill-list"></ol>
+    </div>
+
+    <p class="note" id="contracts-note">&nbsp;</p>
+    <details class="note-details" id="violations-note" hidden>
+      <summary class="warn" id="violations-summary"></summary>
+      <ol class="op-list" id="violations-list"></ol>
+    </details>
+    <details class="note-details" id="unread-note" hidden>
+      <summary class="warn" id="unread-summary"></summary>
+      <ol class="op-list" id="unread-list"></ol>
+    </details>
+  </section>
+
+  <!-- Everything the session created, read from the store, grouped by whatever
+       the packs called themselves. -->
+  <section class="card span-2" id="inventory-card">
+    <div class="card-head">
+      <h2>resources</h2>
+      <div class="log-controls">
+        <span class="hint" id="inventory-count">&mdash;</span>
+        <input type="search" id="inventory-search" class="search" placeholder="filter by id, type, state, provider" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <p class="note" id="inventory-empty" hidden>
+      Nothing has been created yet. Point a real client at this endpoint and it appears here:
+      <code class="mono">eval "$(feint env &lt;provider&gt;)"</code>, then run the client's own create.
+    </p>
+    <div id="inventory-groups" class="groups"></div>
+  </section>
+
+  <!-- The machines region is built by the script, and only when a driver
+       declares itself. With --vm off it is absent from the document rather than
+       hidden by a rule: a region styled away is a region a reader can find in
+       the inspector and believe. -->
+  <div id="machines-slot"></div>
+
+  <!-- The versioned gap with the upstream surface, with the date and the command. -->
+  <section class="card" id="upstream-card">
+    <div class="card-head">
+      <h2>upstream surface</h2>
+      <span class="hint">versioned artefact, not a live measurement</span>
+    </div>
+    <div id="upstream-rows" class="rows"></div>
+    <p class="note" id="upstream-empty" hidden></p>
+    <p class="note" id="upstream-hint">Open a product to read every operation it declines, and the reason it was declined.</p>
+    <p class="provenance">
+      <span id="upstream-source" class="mono">&mdash;</span>
+      <span id="upstream-written"></span>
+      <span class="refresh">refresh with <code class="mono" id="upstream-refresh"></code></span>
+    </p>
+  </section>
+
+  <!-- Three things and no more: what went through, what was not read, what does
+       not exist. -->
+  <section class="card span-2 log-card">
+    <div class="card-head">
+      <h2>call log</h2>
+      <div class="log-controls">
+        <span class="live" id="live" data-state="off">live</span>
+        <button type="button" id="filter-problems" class="ghost" aria-pressed="false">problems only</button>
+        <button type="button" id="pause" class="ghost" aria-pressed="false">pause</button>
+        <button type="button" id="clear" class="ghost">clear</button>
+      </div>
+    </div>
+    <p class="note" id="log-empty">Nothing yet. Drive the emulator with a real client and every call lands here, in order, with the fields no handler read and the answers its API description does not define.</p>
+    <ol id="log" class="log" role="log"></ol>
+    <p class="note buffered" id="buffered" hidden></p>
+  </section>
+
+</main>
+
+<footer>
+  <span>read-only, loopback only, no authentication &mdash; and <a href="https://github.com/stephrobert/feint/blob/main/SECURITY.md">why</a>.</span>
+</footer>
+
+<script src="/_feint/ui/app.js"></script>
+</body>
+</html>
