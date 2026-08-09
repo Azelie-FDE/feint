@@ -11,6 +11,61 @@ Two kinds of change deserve their own line whatever their size, because they are
 what this project is judged on: **a response shape a client can observe**, and
 **a limit that moved**. A refactor that changes neither belongs in `git log`.
 
+## [Unreleased]
+
+### Added
+
+- **Outscale's routing and storage families**, driven end to end by the real
+  Terraform provider: security groups and their rules, route tables, routes and
+  their links, network interfaces, internet services, NAT services, public IPs
+  and their links, snapshots, and images a client registers beside the fixed
+  catalogue. `tools/conformance/outscale/terraform.sh` now applies the provider's
+  own `examples/net_vm` plus the storage chain — seventeen resources — with an
+  empty second plan and a clean destroy. The conformance score went from 88 to
+  109 of 145 routes proven by a real client.
+- **Twenty fields on `ReadVms` that the real cloud returns and the emulator did
+  not**, including `Nics`, `Placement`, `Architecture`, `BootMode`,
+  `RootDeviceType` and `PrivateDnsName`; `LinkPublicIp` on an interface; and
+  `SnapshotId` on a volume cut from one. Found by recording a real account and
+  diffing it per operation against the emulator — a class of defect no contract
+  can see, because Outscale's schemas declare almost no required field (#88).
+
+### Changed
+
+- **Filters a real client sends are applied rather than refused**, on route
+  tables (`RouteDestinationIpRanges`, the link filters), public IPs
+  (`LinkPublicIpIds`), machines and interfaces (`SecurityGroupIds`) and volumes
+  (`LinkVolumeVmIds`, which is how the provider waits for an attach and a
+  detach). Each was a 400 that stopped a real apply or destroy partway.
+- **`ReadLoadBalancers` answers an empty list** instead of being declined. The
+  rest of the family stays declined: declining a read whose honest answer is
+  "none" costs a client the ability to ask and buys no honesty.
+
+### Added (tooling)
+
+- **`feint proxy`**, a reverse proxy that sits between a real official client and
+  a real cloud and writes down every exchange as JSON Lines of
+  `internal/trace.Exchange` — the same shape the emulator's own ring publishes.
+  Credentials never reach the file: redaction is a property of the recorded type,
+  not a step a call site can forget. It is how this project stops guessing what a
+  client sends and measures it instead, and the first real passage recorded a
+  genuine finding — `scw` calls `GET /block/v1alpha1/zones/{zone}/volumes/{id}`,
+  which no pack serves. Loopback only unless `--expose-to-network`, because every
+  request through it carries a live credential.
+- **`feint transcript`**, which turns a proxy recording into the three answers a
+  developer needs before serving one more operation, so the file is queried by a
+  verb instead of by knowing where in the JSON each fact sits:
+  - with no flag, **the operations a real client called that no pack serves**,
+    ranked by call count then response size — the work queue, derived from a
+    measurement instead of the roadmap's guess;
+  - `--shape <operation>`, **the field tree the real cloud actually returned**,
+    which is not what the SDK says it may return;
+  - `--shape <op> --against <emulator.jsonl>`, **the fields the real cloud returns
+    that the emulator omits or types differently** — a response-shape defect no
+    unit test can see, found before the handler is written rather than after.
+    Measured against Outscale, this reported that the emulator's `ReadVolumes`
+    omits `SnapshotId` and never populates `LinkedVolumes`.
+
 ## [0.5.0]
 
 ### Added

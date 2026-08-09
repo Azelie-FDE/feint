@@ -175,6 +175,67 @@ func (p *Pack) Routes() []emulator.Route {
 		p.route("CreateKeypair", p.createKeypair),
 		p.route("ReadKeypairs", p.readKeypairs),
 		p.route("DeleteKeypair", p.deleteKeypair),
+
+		// What a Net is born with — its default security group, its main route
+		// table, the account's DHCP options set — and the interfaces its
+		// machines carry. Read-only: the shapes are measured against a real
+		// account (X-2 sweep, 2026-08-08), and the lifecycle calls are the rest
+		// of OSC-3 (#10).
+		p.route("ReadSecurityGroups", p.readSecurityGroups),
+		p.route("CreateSecurityGroup", p.createSecurityGroup),
+		p.route("DeleteSecurityGroup", p.deleteSecurityGroup),
+		p.route("CreateSecurityGroupRule", p.createSecurityGroupRule),
+		p.route("DeleteSecurityGroupRule", p.deleteSecurityGroupRule),
+		p.route("ReadRouteTables", p.readRouteTables),
+		p.route("CreateRouteTable", p.createRouteTable),
+		p.route("DeleteRouteTable", p.deleteRouteTable),
+		p.route("LinkRouteTable", p.linkRouteTable),
+		p.route("UnlinkRouteTable", p.unlinkRouteTable),
+		p.route("CreateRoute", p.createRoute),
+		p.route("DeleteRoute", p.deleteRoute),
+		p.route("UpdateRoute", p.updateRoute),
+		p.route("ReadDhcpOptions", p.readDhcpOptions),
+		p.route("ReadNics", p.readNics),
+		p.route("CreateNic", p.createNic),
+		p.route("DeleteNic", p.deleteNic),
+		p.route("LinkNic", p.linkNic),
+		p.route("UnlinkNic", p.unlinkNic),
+
+		// The gateway a Net attaches, and the egress a subnet buys with an
+		// address: the resource algebra Terraform's destroy order depends on.
+		// Control plane only — internetservices.go says what does not flow.
+		p.route("CreateInternetService", p.createInternetService),
+		p.route("ReadInternetServices", p.readInternetServices),
+		p.route("LinkInternetService", p.linkInternetService),
+		p.route("UnlinkInternetService", p.unlinkInternetService),
+		p.route("DeleteInternetService", p.deleteInternetService),
+		p.route("CreatePublicIp", p.createPublicIP),
+		p.route("ReadPublicIps", p.readPublicIPs),
+		p.route("DeletePublicIp", p.deletePublicIP),
+		p.route("LinkPublicIp", p.linkPublicIP),
+		p.route("UnlinkPublicIp", p.unlinkPublicIP),
+		p.route("CreateNatService", p.createNatService),
+		p.route("ReadNatServices", p.readNatServices),
+		p.route("DeleteNatService", p.deleteNatService),
+
+		// Snapshots as control-plane records (OSC-4, #13); snapshots.go carries
+		// the no-bytes caveat.
+		p.route("CreateSnapshot", p.createSnapshot),
+		p.route("ReadSnapshots", p.readSnapshots),
+		p.route("CreateImage", p.createImage),
+		p.route("UpdateImage", p.updateImage),
+		p.route("DeleteImage", p.deleteImage),
+		p.route("DeleteSnapshot", p.deleteSnapshot),
+
+		// The region's fixed catalogues, same rule as ReadVmTypes: what a
+		// client reads on its way to creating something is served, small and
+		// fixed.
+		// The inventory of load balancers, which is none. The rest of the
+		// family stays declined; loadbalancers.go draws the line.
+		p.route("ReadLoadBalancers", p.readLoadBalancers),
+
+		p.route("ReadNetAccessPointServices", p.readNetAccessPointServices),
+		p.route("ReadPublicIpRanges", p.readPublicIPRanges),
 	}
 }
 

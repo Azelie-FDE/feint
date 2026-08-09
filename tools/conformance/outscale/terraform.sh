@@ -114,6 +114,49 @@ printf '%s' "$vms" | jq -e 'any(.Vms[0].Tags[]?; .Key == "name" and .Value == "f
   || fail "the tag the provider created is not on the Vm: $vms"
 ok "served, and carrying its tag"
 
+# The routing family, which the apply proves the provider accepted and this
+# proves the emulator actually holds. Each of these was a 400 on a filter the
+# provider sends and the pack had not declared — found here, by this fixture,
+# after every one of them passed its unit test and the contract.
+echo "- the routing the provider built is served, and answers its own filters"
+igw_id="$("$TF" output -raw internet_service_id)"
+rtb_id="$("$TF" output -raw route_table_id)"
+sg_id="$("$TF" output -raw security_group_id)"
+public_ip="$("$TF" output -raw public_ip)"
+
+# By destination, which is how the provider reads a route back. This filter
+# failing is what killed the apply at resource eleven of thirteen.
+routes="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadRouteTables" -H 'Content-Type: application/json' \
+           -d '{"Filters":{"RouteDestinationIpRanges":["0.0.0.0/0"]}}')" || fail "ReadRouteTables rejected"
+printf '%s' "$routes" | jq -e --arg r "$rtb_id" --arg g "$igw_id" \
+  'any(.RouteTables[]; .RouteTableId == $r and any(.Routes[]; .DestinationIpRange == "0.0.0.0/0" and .GatewayId == $g))' >/dev/null \
+  || fail "the default route through the gateway is not served: $routes"
+
+# The link, by the subnet it names.
+printf '%s' "$routes" | jq -e --arg r "$rtb_id" \
+  'any(.RouteTables[]; .RouteTableId == $r and any(.LinkRouteTables[]; .SubnetId != null))' >/dev/null \
+  || fail "the route table link to the subnet is not served: $routes"
+
+# The rule the provider added, on the group it named.
+groups="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadSecurityGroups" -H 'Content-Type: application/json' \
+           -d "{\"Filters\":{\"SecurityGroupIds\":[\"$sg_id\"]}}")" || fail "ReadSecurityGroups rejected"
+printf '%s' "$groups" | jq -e \
+  'any(.SecurityGroups[0].InboundRules[]; .IpProtocol == "tcp" and .FromPortRange == 22 and (.IpRanges | index("198.51.100.0/24")))' >/dev/null \
+  || fail "the inbound rule the provider created is not served: $groups"
+
+# The machine wears the group it was created with, resolved to {id, name}.
+printf '%s' "$vms" | jq -e --arg s "$sg_id" \
+  'any(.Vms[0].SecurityGroups[]; .SecurityGroupId == $s)' >/dev/null \
+  || fail "the Vm does not wear the security group it was created with: $vms"
+
+# The address link, read back by the link id the way the provider does.
+addresses="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadPublicIps" -H 'Content-Type: application/json' \
+              -d "{\"Filters\":{\"PublicIps\":[\"$public_ip\"]}}")" || fail "ReadPublicIps rejected"
+printf '%s' "$addresses" | jq -e --arg v "$vm_id" \
+  '.PublicIps[0].VmId == $v and (.PublicIps[0].LinkPublicIpId | startswith("eipassoc-"))' >/dev/null \
+  || fail "the public IP is not linked to the Vm: $addresses"
+ok "route, link, rule, group and address all served as built"
+
 echo "- the volume the provider created is served"
 volume_id="$("$TF" output -raw volume_id)"
 [ -n "$volume_id" ] || fail "no volume id in the outputs"
@@ -122,6 +165,40 @@ volumes="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadVolumes" -H 'Content-Type: app
 printf '%s' "$volumes" | jq -e '.Volumes | length == 1' >/dev/null \
   || fail "the volume Terraform created is not served: $volumes"
 ok "volume $volume_id"
+
+# The storage chain of OSC-4: the volume attached to the machine, the snapshot
+# taken from it, the image cut from the snapshot. The provider polls
+# ReadVolumes filtered on LinkVolumeVmIds to wait for the attach — a filter
+# this pack refused until the fixture asked for it, which failed the apply and
+# then the destroy.
+echo "- the storage chain is served, link included"
+snapshot_id="$("$TF" output -raw snapshot_id)"
+image_id="$("$TF" output -raw image_id)"
+
+linked="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadVolumes" -H 'Content-Type: application/json' \
+           -d "{\"Filters\":{\"LinkVolumeVmIds\":[\"$vm_id\"]}}")" || fail "ReadVolumes rejected"
+printf '%s' "$linked" | jq -e --arg v "$vm_id" \
+  'any(.Volumes[]; any(.LinkedVolumes[]; .VmId == $v and .State == "attached"))' >/dev/null \
+  || fail "the volume link the provider made is not served: $linked"
+
+snapshots="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadSnapshots" -H 'Content-Type: application/json' \
+              -d "{\"Filters\":{\"SnapshotIds\":[\"$snapshot_id\"]}}")" || fail "ReadSnapshots rejected"
+printf '%s' "$snapshots" | jq -e '.Snapshots[0].State == "completed" and .Snapshots[0].Progress == 100' >/dev/null \
+  || fail "the snapshot is not readable as completed: $snapshots"
+
+# The image must be listed beside the catalogue, or a client cannot read back
+# what it just registered — the shape of bug that plans a change for ever.
+image_list="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadImages" -H 'Content-Type: application/json' \
+               -d "{\"Filters\":{\"ImageIds\":[\"$image_id\"]}}")" || fail "ReadImages rejected"
+printf '%s' "$image_list" | jq -e --arg s "$snapshot_id" \
+  '.Images | length == 1 and (.[0].BlockDeviceMappings[0].Bsu.SnapshotId == $s)' >/dev/null \
+  || fail "the registered image does not name the snapshot it was cut from: $image_list"
+# And the catalogue is still there beside it.
+all_images="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadImages" -H 'Content-Type: application/json' -d '{}')" \
+  || fail "ReadImages rejected"
+printf '%s' "$all_images" | jq -e '[.Images[] | select(.ImageId == "ami-00000001")] | length == 1' >/dev/null \
+  || fail "the fixed catalogue vanished once an image was registered: $all_images"
+ok "volume linked, snapshot completed, image cut from it and listed"
 
 # Terraform plans an empty diff against a state it just wrote only if every
 # attribute the provider reads back matches what it sent. An invented field, a
