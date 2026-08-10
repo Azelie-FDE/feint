@@ -63,13 +63,42 @@ const apiPrefix = "/v2"
 func (p *Pack) listZones(w http.ResponseWriter, r *http.Request) {
 	zones := make([]map[string]any, 0, len(zoneNames))
 	for _, name := range zoneNames {
+		// The real answer also carries an id per zone, measured on 2026-08-10
+		// and absent from their published schema, which this emulator's
+		// contract check enforces as closed. The field stays off the wire for
+		// the same reason as security-group's visibility: a response the
+		// emulator would refuse itself is not one it may send.
 		zones = append(zones, map[string]any{
-			"name":         name,
+			"name": name,
+			// No id, and that is measured rather than an oversight. The live API
+			// sends one on every zone — recorded in shapes/exoscale.json — while
+			// their published OpenAPI declares no such field on `zone`. Emitting
+			// it fails this emulator's own contract check, which is the gate that
+			// keeps every other answer honest.
+			//
+			// Same call as start/stop's `resource` envelope in lifecycle.go: the
+			// live API is ahead of its own description in four measured places,
+			// and the rule is to serve what clients decode and what the contract
+			// accepts. Raised as #94 from a shape diff and closed as not-a-defect
+			// on that basis: TestEveryRouteAnswersItsContract in internal/probe fails
+			// the moment the field is added.
 			"api-endpoint": emulator.EndpointOf(r) + apiPrefix,
 			"sos-endpoint": "",
 		})
 	}
 	emulator.WriteJSON(w, http.StatusOK, map[string]any{"zones": zones})
+}
+
+// listDeployTargets answers the read the CLI makes while resolving a create.
+// An emulated account has no deploy target, and the empty list is the measured
+// answer of a real account that has none.
+func (p *Pack) listDeployTargets(w http.ResponseWriter, _ *http.Request) {
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{"deploy-targets": []any{}})
+}
+
+// getDeployTarget can only miss: nothing here ever creates one.
+func (p *Pack) getDeployTarget(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusNotFound, "resource not found")
 }
 
 // instanceTypes is the emulated offering. Two sizes of the standard family:
