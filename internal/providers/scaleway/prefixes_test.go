@@ -2,6 +2,7 @@ package scaleway_test
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -36,23 +37,73 @@ func TestEveryRouteFallsUnderADeclaredPrefix(t *testing.T) {
 	}
 }
 
-// A prefix matching no route is the mirror defect: it claims a product this pack
-// does not serve at all, so requests meant for another pack, or for nothing,
-// come back wearing Scaleway's error shape.
-func TestEveryDeclaredPrefixIsActuallyServed(t *testing.T) {
+// The mirror defect is over-claiming, and it is not "a prefix with no route".
+//
+// That is what this test asked for until 2026-08-11, and the premise was wrong:
+// it read a prefix serving nothing as a product this pack has no business
+// answering for. But `/lb/v1/` is Scaleway's URL space whether this pack serves
+// it or not, and a request landing there is unambiguously a Scaleway client's.
+// Answering it in Scaleway's dialect is correct; answering it in net/http's
+// text/plain is the defect @vde-dis reported on #74. The old assertion was
+// holding that defect in place, which is why it is replaced rather than
+// deleted.
+//
+// What over-claiming actually means is reaching into another pack's space, and
+// that is not checked here. It was, for an hour, against a hand-written list of
+// the other two roots — which is the same defect one level up: a list a fourth
+// pack would be absent from, green while measuring nothing of it.
+//
+// It lives in the core instead, where the resolution happens and where whatever
+// is mounted gets checked by existing: `NewServer` refuses two packs whose
+// spaces overlap, the way `NewTable` already refuses two packs claiming one
+// route. See TestTwoPacksMayNotClaimOverlappingSpaces in
+// internal/core/emulator.
+//
+// What is left for this pack to assert is the half only it can know: that its
+// declared space really is Scaleway's.
+func TestEveryDeclaredPrefixLooksLikeAScalewayProduct(t *testing.T) {
 	pack := scaleway.New(emulator.DefaultEnv())
 	unrouted, _ := any(pack).(emulator.Unrouted)
 
+	// `/<product>/v<N>[alpha|beta]<M>/`, which is how Scaleway mounts every
+	// product. A prefix shaped otherwise is either a typo or somebody else's
+	// space, and both answer requests in this pack's dialect.
+	shape := regexp.MustCompile(`^/[a-z0-9-]+/v[0-9]+(alpha[0-9]*|beta[0-9]*)?/$`)
+
 	for _, prefix := range unrouted.Prefixes() {
-		used := false
-		for _, route := range pack.Routes() {
-			if strings.HasPrefix(route.Path, prefix) {
-				used = true
-				break
-			}
+		if !shape.MatchString(prefix) {
+			t.Errorf("prefix %q is not shaped like a Scaleway product root", prefix)
 		}
-		if !used {
-			t.Errorf("prefix %q claims a product no route serves", prefix)
+	}
+}
+
+// TestAnUnservedProductAnswersInScalewaysDialect is #74's finding, driven.
+//
+// A product with no routes at all is invisible to
+// TestEveryRouteFallsUnderADeclaredPrefix, which walks the routes this pack
+// mounts. So the guard that claimed to stop "a whole product answering
+// net/http's plain text" could only ever see the served half, and the unserved
+// half answered `404 page not found` in text/plain — which the SDK drops,
+// leaving a caller with "404 Not Found" and nothing else.
+func TestAnUnservedProductAnswersInScalewaysDialect(t *testing.T) {
+	ts := newTestServer(t)
+
+	// Both measured by @vde-dis under a real OpenTofu apply: a load balancer
+	// address and a public gateway address, neither served, both Scaleway.
+	for _, path := range []string{
+		"/lb/v1/zones/fr-par-1/ips",
+		"/vpc-gw/v2/zones/fr-par-1/ips",
+		"/block/v1/zones/fr-par-1/volumes",
+	} {
+		// do() decodes the body as JSON and fails otherwise, which is the half
+		// that matters: the SDK reads the content type first and drops a body
+		// that is not application/json.
+		status, body := do(t, ts, "GET", path, "")
+		if status != http.StatusNotImplemented {
+			t.Errorf("%s answered %d, want 501", path, status)
+		}
+		if body["type"] != "not_emulated" {
+			t.Errorf("%s answered type %v, want not_emulated", path, body["type"])
 		}
 	}
 }
