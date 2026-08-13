@@ -15,9 +15,47 @@ parce que c'est là-dessus que ce projet est jugé : **une forme de réponse qu'
 client peut observer**, et **une limite qui a bougé**. Une refactorisation qui ne
 change ni l'un ni l'autre a sa place dans `git log`.
 
-## [Non publié]
+## [0.7.3]
 
 ### Corrigé
+
+- **L'adresse qu'un client lit répond désormais, sur les trois providers et
+  dans les deux modes de runtime** (#116, #117). Un serveur portant une IP
+  flexible publiait une adresse pendant que la machine en portait une autre, ou
+  aucune : le routage était enregistré avant que la machine n'existe et n'était
+  jamais rejoué au démarrage, et une machine sans NIC privée démarrait sur le
+  pont du profil de l'opérateur, où poser une règle de pare-feu rebranchait
+  l'interface et lui coûtait son bail DHCP. Un `ssh` vers l'adresse publiée
+  expirait donc pendant que le conteneur tournait et répondait à ses voisins.
+
+  L'adresse qu'un client lit reste celle du provider — TEST-NET-3, -2 et -1, un
+  bloc par pack pour que deux clouds émulés sur un même hôte ne routent jamais
+  la même /32 — et elle est réellement routée, dès le premier démarrage, sur un
+  réseau que l'émulateur possède. Publier l'adresse DHCP du runtime a été
+  écarté : cela désynchronise `server.public_ips[].address` de `GET /ips/{id}`,
+  ce que le vrai cloud ne fait jamais, et cela varie avec `--vm` et avec l'hôte.
+
+  `dynamic_ip_required` était décodé, réécrit dans la réponse et lu par
+  personne ; il alloue désormais une adresse éphémère, relâchée à l'arrêt.
+  Parce que le champ *était* lu, il n'apparaissait jamais dans
+  `unread_request_fields`, le seul angle mort du gate de contrat.
+
+- **Le login est prouvé sur les trois packs, plus affirmé sur deux.** `ssh.sh`
+  n'existait que pour Scaleway : `outscale` et le `default-user` du template
+  Exoscale n'étaient que des noms dans une table que personne ne pilotait. Il y
+  a trois suites désormais, chacune enregistrant sa clé par l'API de son
+  provider et ouvrant une vraie session, et chacune échoue au lieu de se sauter
+  quand un runtime est présent — celle de Scaleway se sautait, et c'est ainsi
+  qu'une adresse cassée est partie sous un run vert.
+
+- **Ce qu'OVN ne sait pas faire est déclaré plutôt qu'écrit en limite.** Une
+  adresse interne à un subnet répond à l'hôte en mode pont et pas en OVN, parce
+  que le routeur qui sépare deux VPC fait aussi du SNAT sur les connexions de
+  l'hôte au retour — mesuré, sshd vivant et répondant à ses voisins pendant que
+  l'hôte lisait le port comme fermé. `capabilities.private_from_host` dit
+  lequel, de sorte qu'une sonde se saute avec un motif au lieu d'échouer, et le
+  plan public routé traverse dans les deux modes : c'est par lui que passe la
+  chaîne ssh de chaque pack.
 
 - **Un produit Scaleway entier répondait `404 page not found` en texte brut.**
   Signalé par @vde-dis sur #74, mesuré sous un vrai apply OpenTofu :
@@ -55,6 +93,24 @@ change ni l'un ni l'autre a sa place dans `git log`.
   enregistrée par le client via `CreateImage` (Outscale) refuse de la même
   façon, l'émulateur n'ayant derrière elle qu'un enregistrement et aucun
   contenu de disque, et le journal dit lequel des deux cas s'applique.
+
+### Sécurité
+
+- **Deux installations de CI prenaient la dernière version disponible.**
+  `pipx install uv`, dans le workflow de dérive hebdomadaire, n'était épinglé à
+  rien — et c'est le job qui régénère des artefacts versionnés et ouvre une pull
+  request avec eux ; commitizen, lui, l'était par version et non par empreinte.
+  Les deux installent désormais depuis un fichier d'exigences avec empreintes,
+  et `TestTheWorkflowsPinTheSameToolsAsMise` échoue dès qu'une version y cesse
+  de correspondre au fichier qui la possède : `mise.toml` pour uv, le hook
+  pre-commit pour commitizen, de sorte qu'un poste et un runner ne peuvent pas
+  exécuter des outils différents. Signalé par Pinned-Dependencies d'OpenSSF
+  Scorecard.
+
+- **`SECURITY.md` porte une adresse joignable.** Il décrivait comment signaler
+  sans lier quoi que ce soit : il fallait savoir où GitHub range le formulaire.
+  Il nomme désormais l'URL de l'avis, et une seconde voie pour qui n'a pas accès
+  à GitHub.
 
 ## [0.7.2]
 
