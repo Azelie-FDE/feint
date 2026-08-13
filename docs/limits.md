@@ -210,6 +210,86 @@ misreading its own probe, not the firewall: a dropped connection is killed by
 `timeout` with an empty output, which the assertion then matched as a successful
 answer. The verdict of every probe in `network.sh` is now an exit code.
 
+## A public address is the provider's value, made to answer on the host
+
+Two defensible answers existed for which address a client reads on a server
+(#116): the runtime address the machine got from its bridge, or the fictional
+one the pack allocated from `203.0.113.0/24` (TEST-NET-3, RFC 5737). This
+emulator publishes **the fictional one, and routes it for real**: the address
+`public_ips[0].address` reports is the address the machine carries on its
+interface, reachable from the host that runs the emulator, filtered by the
+server's security group. `ssh root@203.0.113.2` opens a shell.
+
+The rejected option — publishing the runtime address — is rejected for three
+measured reasons. It desynchronises the two views of one attachment, since
+`GET /ips/{id}` must keep answering the address it allocated, and the real API
+never lets `server.public_ips[].address` differ from the flexible IP it names.
+It changes with the `--vm` mode and the operator's host, so the same test would
+read different "public" addresses on two machines, which is the half-truth this
+project exists to avoid. And it was never needed: the network conformance suite
+had already proven the fictional address can genuinely answer through the
+group; what #116 measured was two ordering holes, not a wrong address plane.
+
+The two holes, and where they are held:
+
+- **An address attached before the boot was never routed.** `attachAddress`
+  ran while the server had no machine and silently did nothing, and nothing
+  replayed it at poweron. Now the promised addresses ride the launch as device
+  route keys — set while the instance is cold, because editing them on a live
+  OVN NIC re-plugs the device and the guest loses its DHCP lease with nothing
+  left to renew it — and poweron replays the guest half.
+  `TestPowerOnRoutesAnAddressAttachedBeforeBoot` and
+  `TestPublicAddressesAreRoutedBeforeTheFirstBoot` hold it.
+- **A machine with no private NIC had no lawful interface for the route.** It
+  used to boot on the operator's default profile bridge, which the driver
+  rightly refuses to route through (`mustOwn`), and covering that NIC with a
+  firewall meant *overriding* a profile device — a re-plug after boot that cost
+  the guest its DHCP lease: `incus list` showed RUNNING with no IPv4 at all.
+  Machines with no attachment now boot on the emulator's own labelled network
+  (`fnt-default`, `10.209.84.0/24`, deliberately obscure like the OVN uplink's
+  block), created on first use and removed by the sweep.
+  `TestAMachineWithNoAttachmentBootsOnTheEmulatorsOwnNetwork` holds it.
+
+`dynamic_ip_required` follows the same mechanism (#117): poweron allocates an
+ephemeral address from the same block — suppressed when a flexible IP is
+already attached, which is upstream's own precedence — publishes it as a
+`dynamic: true` entry of `public_ips`, and releases it on stop, standby,
+terminate and delete alike. It never appears in `/ips`, because upstream never
+lists it there. `TestADynamicAddressFollowsThePowerCycle` holds the cycle.
+
+Bounds, stated rather than implied:
+
+- The address answers **from the host that runs the emulator** (and from the
+  emulated machines). It is a documentation address on purpose; nothing routes
+  it beyond the host, and that is the point — a test that half-works against
+  the real internet is worse than an address that visibly goes nowhere.
+- A **subnet-internal** address — Outscale's `PrivateIp`, Exoscale's
+  `public-ip`, both of which this emulator fills with the machine's own
+  address — answers the host in bridge mode and not in OVN mode, and the
+  runtime declares which (`capabilities.private_from_host`). The cause is
+  isolation's own machinery: the OVN router that separates two VPCs by
+  construction also SNATs the host's connections on the way back, so the
+  handshake never completes — measured, sshd up and answering its neighbours
+  while the host read the port as closed. The routed public plane crosses
+  that boundary in both modes, which is why every pack's ssh chain logs in
+  through it: a Scaleway flexible IP, an Outscale `LinkPublicIp`, an Exoscale
+  elastic IP — each is genuinely routed to the machine, and each pack draws
+  from its own RFC 5737 block (TEST-NET-3, -2 and -1 respectively) so two
+  emulated clouds on one host can never route the same /32 to two machines.
+- On a **virtual machine** (`--vm incus-vm`), the host half of the route is in
+  place from the first boot, and the guest half — the address on the guest's
+  own interface — lands on the first read after the agent answers, the same
+  read that publishes a VM's address.
+- An address attached to a **running** server in OVN mode still bounces the
+  NIC for an instant (the route keys are not live-updatable there; the driver
+  restores what it can, and a DHCP-owned lease is the runtime's to re-issue).
+  Attach before boot when the order is yours to choose; it always is in
+  Terraform, where the IP and the server share a plan.
+- A stored address — a flexible IP's, a dynamic one — is revalidated before it
+  reaches the driver: one outside the emulated block is refused and logged,
+  never routed, because a restored snapshot carries these values verbatim.
+  `TestAPoisonedStoredAddressIsNeverRouted` holds the refusal.
+
 ## Subnet isolation depends on the runtime mode
 
 Upstream, two private networks of two different VPCs do not reach each other.
@@ -718,16 +798,23 @@ one with an empty type. If Outscale adds a value, that field is where it goes.
 
 ## Outscale's gateways and NAT move records, not packets
 
-`InternetService`, `LinkInternetService`, `NatService`, `LinkPublicIp` and the
-routes that name them are served, and none of them makes a packet flow.
+`InternetService`, `LinkInternetService`, `NatService` and the routes that
+name them are served, and none of them makes a packet flow.
 
-This one is structural rather than unbuilt, and the difference matters because
+`LinkPublicIp` is no longer on that list: a linked address is routed to the
+Vm's machine, answers from the host that runs the emulator, and
+`ssh outscale@<PublicIp>` opens a shell — the outscale ssh conformance suite
+drives exactly that. The limit was real while the machines sat on the
+operator's default bridge, which the driver rightly refuses to route through;
+they boot on emulator-owned networks now.
+
+The rest is structural rather than unbuilt, and the difference matters because
 everything around it was buildable and got built. The emulator has no data
-plane: it creates bridges and containers on one host through Incus, and a NAT
-service is a managed appliance in a facility this machine is not in. A public
-address allocated here comes from `203.0.113.0/24` — TEST-NET-3, reserved by
-RFC 5737 and routed nowhere on purpose, so an address that goes nowhere is
-visibly fictional rather than quietly broken.
+plane beyond that host: a NAT service is a managed appliance in a facility
+this machine is not in. A public address allocated here comes from
+`198.51.100.0/24` — TEST-NET-2, reserved by RFC 5737 and routed nowhere on
+purpose, so beyond this host an address goes visibly nowhere rather than
+quietly somewhere.
 
 What *is* real is the resource algebra, and it is what a plan actually depends
 on: an address a NAT service holds refuses to be released, a gateway refuses to
