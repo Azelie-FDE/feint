@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -106,18 +107,21 @@ func TestJoinEvidenceKeepsTheStrongerAnswerOfTwoFreshLegs(t *testing.T) {
 	off := &evidenceArtefact{Format: evidenceFormat, Version: evidenceVersion,
 		Machines: []string{"none"},
 		Operations: map[string]emulator.Evidence{
-			"op": {Driven: true, Probed: true, Behaviour: true, Contract: emulator.ContractClean, Shape: emulator.ShapeObserved},
+			"op": {Driven: true, Probed: emulator.ProbeResponse, Behaviour: true, Contract: emulator.ContractClean, Shape: emulator.ShapeObserved},
 		}}
 	runtime := &evidenceArtefact{Format: evidenceFormat, Version: evidenceVersion,
 		Machines: []string{"incus"},
 		Operations: map[string]emulator.Evidence{
-			"op": {Driven: true, Dataplane: true, Negative: true, Contract: emulator.ContractViolating, Shape: emulator.ShapeObserved},
+			"op": {Driven: true, Probed: emulator.ProbeRefusal, Dataplane: true, Negative: true, Contract: emulator.ContractViolating, Shape: emulator.ShapeObserved},
 		}}
 
 	joined := joinEvidence(runtime, off)
 	ev := joined.Operations["op"]
-	if !ev.Driven || !ev.Probed || !ev.Dataplane || !ev.Behaviour || !ev.Negative {
+	if !ev.Driven || !ev.Dataplane || !ev.Behaviour || !ev.Negative {
 		t.Errorf("each boolean axis keeps the leg that earned it: %+v", ev)
+	}
+	if ev.Probed != emulator.ProbeResponse {
+		t.Errorf("a validated success in either leg outranks a validated refusal, got %q", ev.Probed)
 	}
 	if ev.Contract != emulator.ContractViolating {
 		t.Errorf("a violation in either leg must survive the join, got %q", ev.Contract)
@@ -148,7 +152,7 @@ func TestReadEvidenceRefusesWhatItCannotAccountFor(t *testing.T) {
 
 func TestEvidenceTokensNameAxesAndNeverCount(t *testing.T) {
 	full := evidenceTokens(emulator.Evidence{
-		Driven: true, Probed: true, Contract: emulator.ContractClean,
+		Driven: true, Probed: emulator.ProbeResponse, Contract: emulator.ContractClean,
 		Dataplane: true, Shape: emulator.ShapeObserved,
 		Behaviour: true, Negative: true,
 	})
@@ -156,6 +160,11 @@ func TestEvidenceTokensNameAxesAndNeverCount(t *testing.T) {
 		if !strings.Contains(full, token) {
 			t.Errorf("missing %s in %q", token, full)
 		}
+	}
+	// A refusal-only probe verdict names itself and never upgrades to `probe`.
+	refusal := evidenceTokens(emulator.Evidence{Probed: emulator.ProbeRefusal, Contract: emulator.ContractUnchecked, Shape: emulator.ShapeUnknown})
+	if refusal != "`probe-refusal`" {
+		t.Errorf("a refusal-only verdict renders its own token, got %q", refusal)
 	}
 	// The doctrine in its falsifiable form: the rendering must never collapse
 	// the axes into a count or a fraction — "5", "5/5" or "of 5" is exactly
@@ -232,4 +241,68 @@ func firstMissing(all []string, n int) []string {
 		return all
 	}
 	return append(all[:n:n], "…")
+}
+
+// A record does not quietly narrow the runtimes it was earned under.
+//
+// Twice in one day an artefact was regenerated from a machines-off run alone and
+// silently dropped the dataplane axis for 169 operations. Nothing was red: the
+// file declared `machines: ["none"]`, so it was honest — and `docs/routes.md`
+// then printed the absence exactly like an operation nothing has proven.
+//
+// The comparison is on runtimes, not on axes, and that distinction is the whole
+// design. An axis can legitimately shrink when a claim is corrected: #156 took
+// `probed` from 181 arrivals down to 83 verdicts, and that is a fix. Losing a
+// *runtime* is never a fix — it means a leg did not run.
+func TestEvidenceRefusesToNarrowTheRuntimesItWasEarnedUnder(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "evidence.json")
+
+	earned := &evidenceArtefact{
+		Format: evidenceFormat, Version: evidenceVersion,
+		Machines:   []string{"incus", "none"},
+		Operations: map[string]emulator.Evidence{"instance/v1/API.ListServers": {}},
+	}
+	writeArtefact(t, path, earned)
+
+	// A run that reaches machines off only would drop every proof taken under
+	// incus. It must refuse, and name what would go.
+	offOnly := &evidenceArtefact{
+		Format: evidenceFormat, Version: evidenceVersion,
+		Machines:   []string{"none"},
+		Operations: map[string]emulator.Evidence{"instance/v1/API.ListServers": {}},
+	}
+	lost := runtimesLost(path, offOnly)
+	if len(lost) != 1 || lost[0] != "incus" {
+		t.Fatalf("narrowing to machines-off reported %v as lost, want [incus]", lost)
+	}
+
+	// The accepting halves, because a guard that refuses every write would pass
+	// the assertion above and stop the tool working.
+	if lost := runtimesLost(path, earned); len(lost) != 0 {
+		t.Errorf("rewriting the same runtimes reported %v as lost", lost)
+	}
+	wider := &evidenceArtefact{
+		Format: evidenceFormat, Version: evidenceVersion,
+		Machines:   []string{"incus", "incus-ovn", "none"},
+		Operations: earned.Operations,
+	}
+	if lost := runtimesLost(path, wider); len(lost) != 0 {
+		t.Errorf("gaining a runtime reported %v as lost", lost)
+	}
+	// And the first write of an artefact narrows nothing.
+	if lost := runtimesLost(filepath.Join(dir, "absent.json"), offOnly); len(lost) != 0 {
+		t.Errorf("writing where no record exists reported %v as lost", lost)
+	}
+}
+
+func writeArtefact(t *testing.T, path string, art *evidenceArtefact) {
+	t.Helper()
+	blob, err := json.MarshalIndent(art, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, append(blob, '\n'), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 }
