@@ -73,8 +73,77 @@ if [ -n "$unread" ]; then
   exit 1
 fi
 
+# The omission half of the same check (#88). A violation above is a field the
+# emulator invented; an entry here is a field both upstream sources vouch for —
+# declared by the provider's document, observed in a real cloud's recorded
+# answer — that no answer of this run ever carried, though its container was
+# served. The contract gate cannot see these (an absent field only violates a
+# schema when it is required, and the providers declare almost none), and the
+# offline shapes gate cannot either (its store is empty, so it never sees an
+# element of a list). This run's populated objects are where the recording
+# finally bites.
+# It judges a whole run, and only a whole run says so.
+#
+# The verdict asks whether *no answer of this run* carried a declared field, so
+# it is a statement about the run's entire population. CI splits the clients
+# across a matrix, one emulator per leg, and a leg that never exercises a
+# feature legitimately never serves the fields that feature produces: the
+# terraform leg drives no oapi-cli, so ReadVms carries no UserData, ReadVolumes
+# no SnapshotId, and ReadSecurityGroups no rule whose member is another group.
+# Failing there blamed the emulator for the shape of the leg.
+#
+# So the gate is declared rather than assumed, the way a driver capability is:
+# FEINT_FIELD_GATE=1 is set by `mise run conformance`, which drives every suite
+# against one emulator, and by the workflow job that does the same. Everywhere
+# else the findings still print, marked for what they are, and fail nothing.
+# An undeclared whole run counts as partial.
+omissions="$(printf '%s' "$report" | jq -r '
+  .fields.missing | to_entries[] | "  \(.key): \(.value | join(", "))"')"
+if [ -n "$omissions" ]; then
+  if [ "${FEINT_FIELD_GATE:-0}" = "1" ]; then
+    echo "FAIL: fields the real cloud returns and no answer of this run carried:" >&2
+    echo "$omissions" >&2
+    echo "       Either serve them, or decline them in the pack's DeclinedFields() with a reason." >&2
+    exit 1
+  fi
+  echo "declared fields no answer of this partial run carried (not judged: this run"
+  echo "drove some clients, not all; the gate runs where every suite does):"
+  echo "$omissions"
+fi
+
+# What the gate subtracts stays visible: each excused field is a pack's
+# decision, printed with its reason, never failed on.
+excused="$(printf '%s' "$report" | jq -r '
+  .fields.excused | to_entries[] | "  \(.key): \(.value | join("; "))"')"
+if [ -n "$excused" ]; then
+  echo "declared fields knowingly not served, each with its reason:"
+  echo "$excused"
+fi
+
+# And a decision that outlived its subject fails: a decline for a field this
+# very run served is arguing about an omission the emulator does not have.
+stale="$(printf '%s' "$report" | jq -r '.fields.stale_declines[]? | "  \(.)"')"
+if [ -n "$stale" ]; then
+  echo "FAIL: field declines whose field the emulator now serves:" >&2
+  echo "$stale" >&2
+  echo "       Remove them, or the excused list rots into fiction." >&2
+  exit 1
+fi
+
 checked="$(printf '%s' "$report" | jq -r '.contracts | join(", ")')"
 [ -z "$checked" ] || echo "  responses checked against the API description of: $checked"
+
+# Coverage, then the blind spot, both counted out loud. Unconfirmed fields are
+# the ones only the document declares: no recording proves the real cloud
+# serves them — and where a recording could arbitrate, four of five such
+# fields turned out to be absent from the real answer too, which is why they
+# are a list to record, not a failure. Each entry is one recording away from
+# becoming either a finding or nothing.
+compared="$(printf '%s' "$report" | jq -r '.fields.compared | length')"
+[ "$compared" = "0" ] || echo "  field completeness: $compared operation(s) compared against what their document declares"
+unconfirmed_fields="$(printf '%s' "$report" | jq -r '[.fields.unconfirmed[] | length] | add // 0')"
+unconfirmed_ops="$(printf '%s' "$report" | jq -r '.fields.unconfirmed | length')"
+[ "$unconfirmed_fields" = "0" ] || echo "  blind spot: $unconfirmed_fields declared field(s) on $unconfirmed_ops operation(s) that no recording arbitrates (fields.unconfirmed on /_feint/conformance)"
 
 printf '%s' "$report" | jq -r '
   .untouched
