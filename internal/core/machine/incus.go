@@ -307,19 +307,45 @@ func (d *Incus) Start(ctx context.Context, spec Spec) (Machine, error) {
 		return d.inspectOrFail(ctx, spec.Name)
 	}
 
-	// Every machine sits on a network of the emulator's. With no attachment it
-	// gets the default machine network, never the operator's default profile:
-	// see DefaultMachineNetwork for the two measured reasons.
+	// What the machine's first interface is, and it is the whole of #202.
+	//
+	// A machine carries the addresses its provider's API publishes and no
+	// others. Measured against real accounts: a Scaleway server has one routed
+	// public address and `private_ip: none`, an Exoscale instance has one
+	// address. This emulator gave two or three, because a machine with no
+	// emulated network to join was put on a managed bridge and took an address
+	// there that no API describes.
+	//
+	// Three cases now, and no invented address in any of them:
+	//
+	//   an emulated network  the primary interface joins it, as before
+	//   only public ones     a routed NIC carries them, with no network under it
+	//   neither              no network device at all, which is what a real
+	//                        cloud gives a server created with ip=none and no
+	//                        private network
+	//
+	// The bridge was doing a second job nothing wrote down: NAT'd outbound, so
+	// cloud-init could install an ssh daemon. #203 removed that job by building
+	// images that already carry one, which is what makes this possible.
 	attachments := spec.Attachments
-	if len(attachments) == 0 {
-		if err := d.ensureDefaultNetwork(ctx); err != nil {
-			return Machine{}, err
+	routed := len(attachments) == 0 && len(spec.PublicAddresses) > 0
+	bare := len(attachments) == 0 && len(spec.PublicAddresses) == 0
+
+	var primary Attachment
+	if len(attachments) > 0 {
+		primary = attachments[0]
+		if !safeName.MatchString(primary.Network) {
+			return Machine{}, fmt.Errorf("invalid network name %q", primary.Network)
 		}
-		attachments = []Attachment{{Network: DefaultMachineNetwork}}
-	}
-	primary := attachments[0]
-	if !safeName.MatchString(primary.Network) {
-		return Machine{}, fmt.Errorf("invalid network name %q", primary.Network)
+		// A pack may ask for the emulator's own network by name — Outscale does,
+		// for a Vm in the public Cloud, where the address it receives is
+		// published as PrivateIp. Nothing creates it implicitly any more, so the
+		// request has to create it.
+		if primary.Network == DefaultMachineNetwork {
+			if err := d.ensureDefaultNetwork(ctx); err != nil {
+				return Machine{}, err
+			}
+		}
 	}
 
 	args := []string{"init", d.resolveImage(ctx, spec.Image), spec.Name}
@@ -329,7 +355,48 @@ func (d *Incus) Start(ctx context.Context, spec Spec) (Machine, error) {
 	// --network creates eth0 on the named network, as the instance's own
 	// device, which is what lets the firewall `set` its keys later instead of
 	// overriding a profile device — the override is a re-plug too.
-	args = append(args, "--network", primary.Network)
+	//
+	// Skipped for a routed or a bare machine: there is no network to join, and
+	// naming one would be the invented address this change removes.
+	if !routed && !bare {
+		args = append(args, "--network", primary.Network)
+	}
+	if bare {
+		// No profile at all, and the root disk declared by hand.
+		//
+		// Without this the machine inherits the operator's default profile and
+		// lands on their bridge: measured, an Exoscale instance came up on
+		// incusbr0 (10.76.154.0/24) carrying an address the pack could not
+		// publish. That is the hazard DefaultMachineNetwork was introduced to
+		// close, and removing the fallback reopened it from the other side.
+		//
+		// The first attempt was `-d eth0,type=none`, on the belief that an
+		// instance-level device masks the profile's device of the same name.
+		// It does not: Incus *merges* them, so `network: incusbr0` from the
+		// profile lands on a device declared `type: none` and the create fails
+		// with "Invalid device option network". Every machine of the network
+		// suite failed to start that way, and the suite reported it as a
+		// machine not carrying its address — the symptom two steps from the
+		// cause.
+		//
+		// One key=value per -d, because the flag takes exactly one and
+		// accumulates: `-d root,type=disk,path=/` is read as a device type
+		// called "disk,path=/".
+		args = append(args, "--no-profiles",
+			"-d", "root,type=disk",
+			"-d", "root,path=/",
+			"-d", "root,pool="+d.rootPool(ctx))
+	}
+	if routed {
+		// The guest has to be told. A routed NIC hands the kernel a static
+		// address and Incus's generated config says `dhcp` regardless, so
+		// without this the interface comes up carrying nothing — measured.
+		netcfg, err := routedNetworkConfig(spec.PublicAddresses)
+		if err != nil {
+			return Machine{}, err
+		}
+		args = append(args, "--config", "cloud-init.network-config="+netcfg)
+	}
 	// Labels become user.* config keys, the Incus equivalent of container labels.
 	for k, v := range spec.Labels {
 		args = append(args, "--config", "user."+k+"="+v)
@@ -356,6 +423,16 @@ func (d *Incus) Start(ctx context.Context, spec Spec) (Machine, error) {
 	// already-exists path and boots without the keys this path was setting —
 	// measured in OVN mode, where the half-made machine came up with no route
 	// key, no DHCP lease and no ssh daemon, while the API said running.
+	if routed {
+		device, err := routedDevice(spec.Name, spec.PublicAddresses)
+		if err != nil {
+			return Machine{}, d.abandonStart(ctx, spec.Name, err)
+		}
+		if _, err := d.run(ctx, device...); err != nil {
+			return Machine{}, d.abandonStart(ctx, spec.Name,
+				fmt.Errorf("give %s a routed interface: %w", spec.Name, err))
+		}
+	}
 	if primary.Address != "" {
 		if _, err := d.run(ctx, "config", "device", "set", spec.Name, "eth0",
 			"ipv4.address="+primary.Address); err != nil {
@@ -363,7 +440,7 @@ func (d *Incus) Start(ctx context.Context, spec Spec) (Machine, error) {
 				fmt.Errorf("pin %s on %s: %w", primary.Address, spec.Name, err))
 		}
 	}
-	if len(spec.PublicAddresses) > 0 {
+	if len(spec.PublicAddresses) > 0 && !routed {
 		routes := make([]string, 0, len(spec.PublicAddresses))
 		for _, address := range spec.PublicAddresses {
 			// The uplink must carry the /32 before the device may name it:
@@ -702,8 +779,17 @@ func (d *Incus) instanceDevices(ctx context.Context, name string) (instanceView,
 // the guest sees, so they have to look like interface names; deriving one from
 // the network name produces something no init script recognises. The match is
 // on the exact name: a substring check would let an existing eth10 shadow eth1.
+//
+// From eth0, not from eth1. It used to start at 1 on the assumption that the
+// boot interface always holds eth0, which stopped being true when a machine
+// with nothing to publish started booting with no interface at all (#202): the
+// first NIC attached afterwards was named eth1, the guest had no such device,
+// and configuring it failed with `Cannot find device "eth1"`. The suite
+// reported that as a machine not carrying its address, two steps from the
+// cause. The loop already skips a name in use, so starting at 0 changes nothing
+// for a machine that does have eth0.
 func freeInterface(devices map[string]map[string]string) string {
-	for i := 1; i < 64; i++ {
+	for i := 0; i < 64; i++ {
 		candidate := fmt.Sprintf("eth%d", i)
 		if _, used := devices[candidate]; !used {
 			return candidate
