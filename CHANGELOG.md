@@ -118,6 +118,59 @@ what this project is judged on: **a response shape a client can observe**, and
 
 ### Changed
 
+- **The in-place half of four Outscale resources is served** (#172, first
+  tranche). Create, read and delete of Nets, Subnets, Nics and route-table links
+  were driven by the provider's own fixture from the first day; the change a
+  *second* `terraform apply` makes was not served at all, so a plan modifying a
+  resource this emulator had created died on an operation nobody had decided
+  about. `UpdateNet`, `UpdateSubnet`, `UpdateNic` and `UpdateRouteTableLink` now
+  answer, and Outscale's untriaged column falls from 18 to 14.
+
+  Every request shape is read from `contracts/outscale.json` rather than
+  recalled. Two rules the tests hold: **absent is not false** —
+  `MapPublicIpOnLaunch` is required, and reading a missing field as `false`
+  would silently turn the flag off on every call that forgot it — and **an
+  update writes only what was sent**, because Terraform sends exactly the
+  attributes that changed and resetting the rest answers a request nobody made.
+
+  All four are **driven by the real Terraform provider**, which took reading its
+  schema rather than guessing: `outscale_net.dhcp_options_set_id` is computed
+  and never sends `UpdateNet` — `outscale_net_attributes` does — and
+  `outscale_route_table_link` cannot be re-pointed at all, its attributes force
+  a replacement, so the call comes from `outscale_main_route_table_link`. Two
+  guesses, both wrong, both corrected by the provider's own source.
+
+  Driving them found two defects in the handlers that four unit tests and a
+  four-mutation falsification had all passed over. A moved link was rebuilt with
+  `Main: false` and an invented `SubnetId`, leaving a Net with **no main route
+  table** — the provider reads it back filtering on `LinkRouteTableMain=true`
+  and found nothing, immediately after a 200. And the list it was removed from
+  was shortened with `append(links[:i], links[i+1:]...)`, which mutates an array
+  the store still shares until `Commit`. The link travels whole now, copied
+  rather than rebuilt. Only the real client saw either of them.
+
+- **The Outscale DHCP options lifecycle is served** (#172, second tranche).
+  `CreateDhcpOptions` and `DeleteDhcpOptions` join the already-served read, and
+  the untriaged column falls from 14 to 11 — the third operation of the batch,
+  `CheckAuthentication`, is declined with the IAM family: the emulator accepts
+  every credential on purpose (SECURITY.md), so a validity verdict on a
+  login/password pair would describe an authentication it never performs.
+
+  The delete carries the two refusals their document states: the account's
+  default set cannot be deleted, and neither can a set a Net still wears. The
+  detach their provider performs before a delete drove two more behaviours out
+  of the document and into the pack: `UpdateNet` accepts the **`default`
+  keyword** (resolved to the account's set, since a Net always carries a
+  `dopt-` id), and `ReadNets` answers the **`DhcpOptionsSetIds` filter** its
+  `getAttachedDHCPs` walks — a filter the pack previously refused by design.
+
+  This closes the proof the first tranche recorded as owed:
+  `outscale_net_attributes` could only point a Net at its own default set, so a
+  *different* set retained was asserted by nothing. The fixture now creates a
+  second set with `outscale_dhcp_option`, points the Net at it, and the suite
+  asks the emulator — not the state file — that the Net wears it, that it
+  differs from the default one, and that the destroy's detach-then-delete
+  sequence leaves the default set standing alone.
 - **The evidence record's freshness rule becomes a control** (#171). *Deleting a
   conformance assertion demotes the operations it proved* was written twice, in
   `internal/cli/evidence.go` and in `mise.toml`, and held by nothing:

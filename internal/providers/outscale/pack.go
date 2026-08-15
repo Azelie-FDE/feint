@@ -167,9 +167,11 @@ func (p *Pack) Routes() []emulator.Route {
 		p.route("CreateNet", p.createNet),
 		p.route("ReadNets", p.readNets),
 		p.route("DeleteNet", p.deleteNet),
+		p.route("UpdateNet", p.updateNet),
 		p.route("CreateSubnet", p.createSubnet),
 		p.route("ReadSubnets", p.readSubnets),
 		p.route("DeleteSubnet", p.deleteSubnet),
+		p.route("UpdateSubnet", p.updateSubnet),
 
 		// Keypairs, on the critical path to a machine anyone can log into.
 		p.route("CreateKeypair", p.createKeypair),
@@ -178,9 +180,9 @@ func (p *Pack) Routes() []emulator.Route {
 
 		// What a Net is born with — its default security group, its main route
 		// table, the account's DHCP options set — and the interfaces its
-		// machines carry. Read-only: the shapes are measured against a real
-		// account (X-2 sweep, 2026-08-08), and the lifecycle calls are the rest
-		// of OSC-3 (#10).
+		// machines carry. The shapes are measured against a real account
+		// (X-2 sweep, 2026-08-08); the DHCP lifecycle is #172's second tranche,
+		// which is what lets a client create a set and point a Net at it.
 		p.route("ReadSecurityGroups", p.readSecurityGroups),
 		p.route("CreateSecurityGroup", p.createSecurityGroup),
 		p.route("DeleteSecurityGroup", p.deleteSecurityGroup),
@@ -191,13 +193,17 @@ func (p *Pack) Routes() []emulator.Route {
 		p.route("DeleteRouteTable", p.deleteRouteTable),
 		p.route("LinkRouteTable", p.linkRouteTable),
 		p.route("UnlinkRouteTable", p.unlinkRouteTable),
+		p.route("UpdateRouteTableLink", p.updateRouteTableLink),
 		p.route("CreateRoute", p.createRoute),
 		p.route("DeleteRoute", p.deleteRoute),
 		p.route("UpdateRoute", p.updateRoute),
 		p.route("ReadDhcpOptions", p.readDhcpOptions),
+		p.route("CreateDhcpOptions", p.createDhcpOptions),
+		p.route("DeleteDhcpOptions", p.deleteDhcpOptions),
 		p.route("ReadNics", p.readNics),
 		p.route("CreateNic", p.createNic),
 		p.route("DeleteNic", p.deleteNic),
+		p.route("UpdateNic", p.updateNic),
 		p.route("LinkNic", p.linkNic),
 		p.route("UnlinkNic", p.unlinkNic),
 

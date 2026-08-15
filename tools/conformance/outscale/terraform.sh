@@ -163,6 +163,67 @@ printf '%s' "$addresses" | jq -e --arg v "$vm_id" \
   || fail "the public IP is not linked to the Vm: $addresses"
 ok "route, link, rule, group and address all served as built"
 
+# The two updates the apply above has already driven, asserted against the
+# emulator rather than against the state file (#172).
+#
+# UpdateRouteTableLink: `outscale_main_route_table_link` re-pointed the Net's
+# main link onto the fixture's table at create — the only Terraform path to
+# that operation, since `outscale_route_table_link` replaces rather than
+# updates. The provider's own read walks this exact filter and then finds its
+# link by id, so the main table answering with the moved link Main:true is what
+# a successful apply depends on; asking again here is what makes the proof the
+# emulator's rather than the provider's.
+#
+# UpdateNet: `outscale_net_attributes` sent it at create, and since the
+# DhcpOptions family landed (#172, second tranche) it points at a set this very
+# apply created — so what is asserted is no longer "the reference survived" but
+# that the emulator retained a *different* set than the one the Net was born
+# with, which closes the proof the previous fixture recorded as owed.
+echo "- the main link was re-pointed, and the Net wears the created DHCP set"
+net_id="$("$TF" output -raw net_id)"
+main_now="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadRouteTables" -H 'Content-Type: application/json' \
+             -d "{\"Filters\":{\"NetIds\":[\"$net_id\"],\"LinkRouteTableMain\":true}}")" \
+  || fail "ReadRouteTables rejected the main filter"
+printf '%s' "$main_now" | jq -e --arg r "$rtb_id" '.RouteTables | length == 1 and .[0].RouteTableId == $r' >/dev/null \
+  || fail "the main link is not on the table Terraform moved it to: $main_now"
+printf '%s' "$main_now" | jq -e \
+  'any(.RouteTables[0].LinkRouteTables[]; .Main == true and (has("SubnetId") | not))' >/dev/null \
+  || fail "the moved main link lost its identity (Main gone, or a SubnetId invented): $main_now"
+
+dopt_id="$("$TF" output -raw dhcp_options_set_id)"
+[ -n "$dopt_id" ] || fail "no dhcp_options_set_id in the outputs"
+default_dopt="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadDhcpOptions" -H 'Content-Type: application/json' -d '{}' \
+                 | jq -r '.DhcpOptionsSets[] | select(.Default == true) | .DhcpOptionsSetId')"
+[ -n "$default_dopt" ] || fail "the account's default DHCP options set is not served"
+# The proof needs the two sets to actually differ, or it collapses back into
+# the half-proof it replaces.
+[ "$dopt_id" != "$default_dopt" ] \
+  || fail "the created set is the default one, so a changed set is still unproven"
+# The created set round-trips through the filter the provider reads back with.
+sets="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadDhcpOptions" -H 'Content-Type: application/json' \
+         -d "{\"Filters\":{\"DhcpOptionsSetIds\":[\"$dopt_id\"]}}")" || fail "ReadDhcpOptions rejected"
+printf '%s' "$sets" | jq -e \
+  '.DhcpOptionsSets | length == 1 and .[0].Default == false
+   and .[0].DomainName == "conformance.feint"
+   and .[0].DomainNameServers == ["192.0.2.53", "192.0.2.54"]
+   and .[0].NtpServers == ["192.0.2.123"]' >/dev/null \
+  || fail "the created DHCP set does not read back as sent: $sets"
+# The tag the provider set on it, through CreateTags with a dopt- id (#99's path).
+printf '%s' "$sets" | jq -e \
+  'any(.DhcpOptionsSets[0].Tags[]; .Key == "Name" and .Value == "conformance-dopt")' >/dev/null \
+  || fail "the tag the provider set on the DHCP set is not served: $sets"
+# The Net wears the created set, asked of the emulator rather than of the state.
+nets_now="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadNets" -H 'Content-Type: application/json' \
+             -d "{\"Filters\":{\"NetIds\":[\"$net_id\"]}}")" || fail "ReadNets rejected"
+printf '%s' "$nets_now" | jq -e --arg d "$dopt_id" '.Nets[0].DhcpOptionsSetId == $d' >/dev/null \
+  || fail "after UpdateNet the Net does not wear the created DHCP set: $nets_now"
+# And the filter the provider's own delete path walks answers exactly this Net.
+worn="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadNets" -H 'Content-Type: application/json' \
+         -d "{\"Filters\":{\"DhcpOptionsSetIds\":[\"$dopt_id\"]}}")" || fail "ReadNets rejected the DhcpOptionsSetIds filter"
+printf '%s' "$worn" | jq -e --arg n "$net_id" '.Nets | length == 1 and .[0].NetId == $n' >/dev/null \
+  || fail "filtering Nets by the created set does not answer the Net wearing it: $worn"
+ok "main table moved by UpdateRouteTableLink, a second DHCP set created and worn through UpdateNet"
+
 # The tags the provider set on the internet service and the route table, which
 # it applies through CreateTags with the identifier it has just been handed. The
 # apply above already fails without this working — that is issue #99, where the
@@ -190,6 +251,8 @@ printf '%s' "$tags" | jq -e --arg r "$rtb_id" \
   'any(.Tags[]; .ResourceId == $r and .ResourceType == "route-table")' >/dev/null \
   || fail "ReadTags does not name the route table with the SDK's own type: $tags"
 ok "tags set, stored, and named with the types the SDK declares"
+
+
 
 echo "- the volume the provider created is served"
 volume_id="$("$TF" output -raw volume_id)"
@@ -247,6 +310,34 @@ case "$plan_status" in
   *) fail "the second plan errored with status $plan_status" ;;
 esac
 
+# The in-place change, which is what a user's second `terraform apply` is and
+# what nothing here proved before #172. Create, read and delete of a Subnet were
+# driven from the first day; the update was not served at all, so a plan that
+# modified a resource this emulator had created died on an untriaged operation.
+#
+# The assertion is against the emulator rather than against Terraform's state: a
+# state file agreeing with itself is not the emulator holding the change.
+echo "- an in-place change is applied, and the emulator holds it"
+subnet_id="$("$TF" output -raw subnet_id)"
+nic_id="$("$TF" output -raw nic_id)"
+"$TF" apply -no-color -auto-approve -var "endpoint=$ENDPOINT" -var "map_public_ip=true" \
+    -var "nic_description=updated by conformance" >/dev/null \
+  || fail "the second apply failed; an in-place change is what UpdateSubnet and UpdateNic serve"
+subnets="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadSubnets" -H 'Content-Type: application/json' \
+            -d "{\"Filters\":{\"SubnetIds\":[\"$subnet_id\"]}}")" || fail "ReadSubnets rejected"
+printf '%s' "$subnets" | jq -e '.Subnets[0].MapPublicIpOnLaunch == true' >/dev/null \
+  || fail "the emulator did not keep the in-place change: $subnets"
+# The NIC's description changed in the same apply, through UpdateNic — the call
+# ResourceOutscaleNicUpdate makes for exactly this attribute. Asked of the
+# emulator by NicId, not of the state file: an update that answers the new
+# value while storing the old one is invisible to a state that agrees with
+# itself.
+nics="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadNics" -H 'Content-Type: application/json' \
+         -d "{\"Filters\":{\"NicIds\":[\"$nic_id\"]}}")" || fail "ReadNics rejected"
+printf '%s' "$nics" | jq -e '.Nics[0].Description == "updated by conformance"' >/dev/null \
+  || fail "the emulator did not keep the NIC's in-place change: $nics"
+ok "second apply changed the Subnet and the Nic, and the emulator answers both new values"
+
 echo "- destroy"
 # The Net this run created, read before it is destroyed: the check below asks
 # whether *this* Net is gone, not whether the emulator holds none at all.
@@ -294,6 +385,20 @@ vms="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadVms" -H 'Content-Type: application
         -d "{\"Filters\":{\"VmIds\":[\"$vm_id\"]}}")" || fail "ReadVms rejected"
 printf '%s' "$vms" | jq -e '.Vms[0].State == "terminated" or (.Vms | length == 0)' >/dev/null \
   || fail "the destroyed Vm is not terminated: $vms"
+
+# The created DHCP set is gone and the account's default one is not: the destroy
+# drove the provider's whole detach-then-delete sequence (ReadNets filtered on
+# the set, UpdateNet back to `default`, DeleteDhcpOptions), and this is the only
+# place a real client exercises it.
+if [ -n "${dopt_id:-}" ]; then
+  sets_after="$(curl -sf -X POST "$ENDPOINT/api/v1/ReadDhcpOptions" -H 'Content-Type: application/json' -d '{}')" \
+    || fail "ReadDhcpOptions rejected"
+  if printf '%s' "$sets_after" | jq -e --arg d "$dopt_id" 'any(.DhcpOptionsSets[]?; .DhcpOptionsSetId == $d)' >/dev/null; then
+    fail "the DHCP set this run created ($dopt_id) outlived its own destroy: $sets_after"
+  fi
+  printf '%s' "$sets_after" | jq -e 'any(.DhcpOptionsSets[]?; .Default == true)' >/dev/null \
+    || fail "the account's default DHCP set went with the destroy: $sets_after"
+fi
 prove_end "$span"
 ok "destroyed, and the API agrees"
 

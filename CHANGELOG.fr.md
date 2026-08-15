@@ -127,6 +127,65 @@ change ni l'un ni l'autre a sa place dans `git log`.
 
 ### Modifié
 
+- **La moitié « en place » de quatre ressources Outscale est servie** (#172,
+  première tranche). La création, la lecture et la suppression des Nets, Subnets,
+  NIC et liens de table de routage étaient pilotées par la fixture du provider
+  depuis le premier jour ; le changement qu'un **second** `terraform apply`
+  produit n'était pas servi du tout, si bien qu'un plan modifiant une ressource
+  que cet émulateur avait créée mourait sur une opération dont personne n'avait
+  décidé. `UpdateNet`, `UpdateSubnet`, `UpdateNic` et `UpdateRouteTableLink`
+  répondent désormais, et la colonne non triée d'Outscale passe de 18 à 14.
+
+  Chaque forme de requête est lue dans `contracts/outscale.json` plutôt que
+  rappelée de mémoire. Deux règles que les tests tiennent : **absent n'est pas
+  faux** (`MapPublicIpOnLaunch` est requis, et lire un champ manquant comme
+  `false` éteindrait le drapeau à chaque appel qui l'oublie) et **une mise à jour
+  n'écrit que ce qui est envoyé**, puisque Terraform n'envoie que les attributs
+  qui changent et que réinitialiser le reste répond à une requête que personne
+  n'a faite.
+
+  Les quatre sont **pilotées par le vrai provider Terraform**, ce qui a demandé
+  de lire son schéma plutôt que de deviner : `outscale_net.dhcp_options_set_id`
+  est *computed* et n'envoie jamais `UpdateNet` (c'est `outscale_net_attributes`
+  qui le fait), et `outscale_route_table_link` ne peut pas être re-pointée du
+  tout, ses attributs forçant un remplacement, si bien que l'appel vient de
+  `outscale_main_route_table_link`. Deux suppositions, deux fois fausses, toutes
+  deux corrigées par la source du provider.
+
+  Les piloter a révélé deux défauts dans les handlers, que quatre tests
+  unitaires et une falsification à quatre mutations avaient tous laissés passer.
+  Un lien déplacé était reconstruit avec `Main: false` et un `SubnetId` inventé,
+  laissant un Net **sans table de routage principale** : le provider le relit en
+  filtrant sur `LinkRouteTableMain=true` et ne trouvait rien, juste après un 200.
+  Et la liste dont il était retiré était raccourcie par
+  `append(links[:i], links[i+1:]...)`, qui mute un tableau que le store partage
+  encore jusqu'au `Commit`. Le lien voyage désormais entier, copié plutôt que
+  reconstruit. Seul le vrai client a vu l'un comme l'autre.
+
+- **Le cycle de vie des options DHCP d'Outscale est servi** (#172, deuxième
+  tranche). `CreateDhcpOptions` et `DeleteDhcpOptions` rejoignent la lecture
+  déjà servie, et la colonne non triée passe de 14 à 11 ; la troisième
+  opération du lot, `CheckAuthentication`, est déclinée avec la famille IAM :
+  l'émulateur accepte toute crédential à dessein (SECURITY.md), donc un verdict
+  de validité sur un couple login/mot de passe décrirait une authentification
+  qu'il n'effectue jamais.
+
+  La suppression porte les deux refus que leur document énonce : le jeu par
+  défaut du compte ne se supprime pas, pas plus qu'un jeu qu'un Net porte
+  encore. Le détachement que leur provider effectue avant une suppression a
+  fait sortir deux comportements de plus du document vers le pack :
+  `UpdateNet` accepte le **mot-clé `default`** (résolu vers le jeu du compte,
+  puisqu'un Net porte toujours un identifiant `dopt-`), et `ReadNets` répond au
+  **filtre `DhcpOptionsSetIds`** que parcourt son `getAttachedDHCPs`, un filtre
+  que le pack refusait jusque-là à dessein.
+
+  Cela ferme la preuve que la première tranche avait notée comme due :
+  `outscale_net_attributes` ne pouvait pointer un Net que vers son propre jeu
+  par défaut, si bien que rien n'affirmait qu'un jeu *différent* était retenu.
+  La fixture crée désormais un second jeu avec `outscale_dhcp_option`, y pointe
+  le Net, et la suite demande à l'émulateur (jamais au fichier d'état) que le
+  Net le porte, qu'il diffère du jeu par défaut, et que la séquence
+  détacher-puis-supprimer du destroy laisse le jeu par défaut seul debout.
 - **La règle de fraîcheur du registre de preuves devient un contrôle** (#171).
   « Supprimer une assertion de conformance rétrograde les opérations qu'elle
   prouvait » était écrit deux fois, dans `internal/cli/evidence.go` et dans
