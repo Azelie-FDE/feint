@@ -359,10 +359,41 @@ func (s *Server) handleUnrouted(w http.ResponseWriter, r *http.Request) {
 	// watching itself would drown the client traffic.
 	rec := &recorder{ResponseWriter: w, status: http.StatusOK}
 	started := time.Now()
-	if best == nil {
-		http.NotFound(rec, r)
-	} else {
+	hint := ""
+	var missing []string
+	switch {
+	case best != nil:
 		best.NotFound(rec, r)
+	default:
+		// Nobody claimed this URL space, so there is no dialect to answer in.
+		// Before falling back to net/http's one-line page, ask the mounted route
+		// table whether this path would have matched with a prefix in front of
+		// it — the shape a client pointed at the wrong endpoint produces, and
+		// the one thing that page never said (#179).
+		hint, missing = missingPrefixHint(r.URL.Path, s.AllRoutes())
+		if hint != "" {
+			writeMispointed(rec, hint)
+		} else {
+			http.NotFound(rec, r)
+		}
+	}
+	// And in the log too, because some CLIs never surface a 404 body: the
+	// operator watching the emulator sees the cause even when their client
+	// swallowed it.
+	//
+	// The prefixes and nothing else. They are read out of this process's own
+	// mounted route table; the sentence in the body embeds the request path, and
+	// that half never reaches a log record.
+	//
+	// The first version logged the path, then the hint that contains it. Both
+	// were defensible — plainPath allow-lists the path before either exists —
+	// but an argument about what an allow-list keeps out is weaker than a value
+	// that never came from the client at all. This is the second kind.
+	//
+	// TestTheLogCarriesNothingTheClientChose fails without it.
+	if len(missing) > 0 {
+		s.env.Log.Warn("a client is pointing without a served prefix",
+			"missing_prefix", strings.Join(missing, " "))
 	}
 	if !internalPath(r.URL.Path) {
 		s.stream.publishExchange(trace.Exchange{
