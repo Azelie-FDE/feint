@@ -140,10 +140,11 @@ func (p *Pack) Declined() []emulator.Decline {
 		// connections and their routes, virtual and client gateways, and the
 		// route propagation that depends on them.
 		//
-		// Net peerings and Net access points are deliberately NOT here. An audit
-		// found them swept in, and they belong on the work list: both ends of a
-		// peering are Nets this emulator creates, and machine.PeerNetworks
-		// already exists to back one.
+		// Net peerings are served (netpeerings.go): both ends of a peering are
+		// Nets this emulator creates, and machine.PeerNetworks backs the
+		// reachability an accepted one grants. Net access points are
+		// deliberately NOT here either — an audit found them swept in — and
+		// they stay on the work list (#172).
 		//
 		// Every one of them terminates somewhere this machine is not — a cross
 		// connect in a carrier facility, a tunnel to a remote site, a
@@ -301,5 +302,26 @@ func (p *Pack) Declined() []emulator.Decline {
 			"oks/Client.UpdateCluster",
 			"oks/Client.UpdateProject",
 			"oks/Client.UpgradeCluster"),
+
+		// A Net access point is a private route from a Net to one of Outscale's
+		// own managed services — object storage above all — so that traffic
+		// reaches it without leaving the Net.
+		//
+		// This emulator runs none of those services. There is nothing on the
+		// other end of the endpoint, so a created access point would name a
+		// destination that does not exist, and `ReadNetAccessPointServices`
+		// would have to answer a catalogue of services nobody can call. That is
+		// the same refusal the managed Kubernetes control plane gets one entry
+		// up, for the same reason: describing a service the emulator does not
+		// run is worse than answering nothing.
+		//
+		// Revisitable, and the condition is stated rather than implied: the day
+		// a pack here serves one of those services, its access point becomes a
+		// route to something real and this entry should go.
+		emulator.Because("a Net access point is a private route to a managed service this emulator does not run, so it would point at nothing",
+			"osc/Client.CreateNetAccessPoint",
+			"osc/Client.DeleteNetAccessPoint",
+			"osc/Client.ReadNetAccessPoints",
+			"osc/Client.UpdateNetAccessPoint"),
 	)
 }

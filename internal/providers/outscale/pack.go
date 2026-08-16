@@ -205,6 +205,8 @@ func (p *Pack) Routes() []emulator.Route {
 		p.route("DeleteNic", p.deleteNic),
 		p.route("UpdateNic", p.updateNic),
 		p.route("LinkNic", p.linkNic),
+		p.route("LinkPrivateIps", p.linkPrivateIps),
+		p.route("UnlinkPrivateIps", p.unlinkPrivateIps),
 		p.route("UnlinkNic", p.unlinkNic),
 
 		// The gateway a Net attaches, and the egress a subnet buys with an
@@ -223,6 +225,16 @@ func (p *Pack) Routes() []emulator.Route {
 		p.route("CreateNatService", p.createNatService),
 		p.route("ReadNatServices", p.readNatServices),
 		p.route("DeleteNatService", p.deleteNatService),
+
+		// Net peerings: both ends are Nets this emulator creates, which is what
+		// kept the family off the declined list. The lifecycle states come from
+		// the SDK's NetPeeringStateName enum; netpeerings.go names what
+		// mono-tenancy makes indistinguishable.
+		p.route("CreateNetPeering", p.createNetPeering),
+		p.route("AcceptNetPeering", p.acceptNetPeering),
+		p.route("RejectNetPeering", p.rejectNetPeering),
+		p.route("DeleteNetPeering", p.deleteNetPeering),
+		p.route("ReadNetPeerings", p.readNetPeerings),
 
 		// Snapshots as control-plane records (OSC-4, #13); snapshots.go carries
 		// the no-bytes caveat.
