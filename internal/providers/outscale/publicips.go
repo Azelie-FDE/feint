@@ -149,7 +149,7 @@ func (p *Pack) createPublicIP(w http.ResponseWriter, r *http.Request) {
 
 	// Serialized like every other allocation: two concurrent creates must not
 	// pick the same address.
-	p.addresses.Lock()
+	unlock := p.lockAddresses()
 	taken := make(map[string]bool, 8)
 	for _, res := range p.env.Store.List(kindPublicIP, resource.Tenant{Provider: Name}) {
 		taken[stringOf(res.Attrs["PublicIp"])] = true
@@ -163,25 +163,18 @@ func (p *Pack) createPublicIP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if address == "" {
-		p.addresses.Unlock()
+		unlock()
 		p.conflict(w, "the emulated public block "+publicIPBase+"0/24 is exhausted; release an address first")
 		return
 	}
 	now := p.env.Now()
-	res := &resource.Resource{
-		ID:      newID("eipalloc", p.env.NewID()),
-		Kind:    kindPublicIP,
-		Tenant:  resource.Tenant{Provider: Name},
-		State:   "available",
-		Created: now,
-		Updated: now,
-		Attrs: map[string]any{
-			"PublicIp": address,
-			"Tags":     []any{},
-		},
+	res := resource.New(newID("eipalloc", p.env.NewID()), kindPublicIP, resource.Tenant{Provider: Name}, "available", now)
+	res.Attrs = map[string]any{
+		"PublicIp": address,
+		"Tags":     []any{},
 	}
 	p.env.Store.Put(res)
-	p.addresses.Unlock()
+	unlock()
 
 	emulator.WriteJSON(w, http.StatusOK, map[string]any{
 		"PublicIp":        publicIPView(res),

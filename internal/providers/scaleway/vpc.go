@@ -250,9 +250,9 @@ func (p *Pack) createPrivateNetwork(w http.ResponseWriter, r *http.Request) {
 	// stored. Choosing and checking overlap without it meant two concurrent
 	// creates read the same state, picked the same free block, both passed
 	// FirstOverlap, and both took it — and Terraform creates ten resources at a
-	// time by default, which is the case p.addresses was introduced for.
-	p.addresses.Lock()
-	defer p.addresses.Unlock()
+	// time by default, which is the case p.lockAddresses() was introduced for.
+	unlock := p.lockAddresses()
+	defer unlock()
 
 	// The block is validated, not stored blindly. floci accepts any CIDR, never
 	// checks the mask, never checks overlap, and reports a fixed address count
@@ -276,23 +276,16 @@ func (p *Pack) createPrivateNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := p.env.Now()
-	res := &resource.Resource{
-		ID:      p.env.NewID(),
-		Kind:    kindPrivateNetwork,
-		Tenant:  resource.Tenant{Provider: Name, Project: project, Zone: region},
-		State:   "available",
-		Created: now,
-		Updated: now,
-		Attrs: map[string]any{
-			"name":                              orDefault(req.Name, "pn-"+prefix.Addr().String()),
-			"project_id":                        project,
-			"organization_id":                   defaultOrganization,
-			"vpc_id":                            vpc.ID,
-			"tags":                              orEmpty(req.Tags),
-			"dhcp_enabled":                      true,
-			"default_route_propagation_enabled": deref(req.DefaultRoutePropagationEnabled, false),
-			"subnet":                            prefix.String(),
-		},
+	res := resource.New(p.env.NewID(), kindPrivateNetwork, resource.Tenant{Provider: Name, Project: project, Zone: region}, "available", now)
+	res.Attrs = map[string]any{
+		"name":                              orDefault(req.Name, "pn-"+prefix.Addr().String()),
+		"project_id":                        project,
+		"organization_id":                   defaultOrganization,
+		"vpc_id":                            vpc.ID,
+		"tags":                              orEmpty(req.Tags),
+		"dhcp_enabled":                      true,
+		"default_route_propagation_enabled": deref(req.DefaultRoutePropagationEnabled, false),
+		"subnet":                            prefix.String(),
 	}
 	// The backing network is created before the resource is stored, and a
 	// failure is fatal to the request rather than logged.
@@ -494,8 +487,8 @@ func (p *Pack) enableDHCP(w http.ResponseWriter, r *http.Request) {
 // security group, it is lazy: the emulator has no notion of "a project was
 // created", so the first read is the only moment it can happen.
 func (p *Pack) ensureDefaultVPC(region, project string) *resource.Resource {
-	p.defaults.Lock()
-	defer p.defaults.Unlock()
+	unlock := p.lockDefaults()
+	defer unlock()
 
 	scope := resource.Tenant{Provider: Name, Project: project, Zone: region}
 	for _, res := range p.env.Store.List(kindVPC, scope) {
@@ -537,65 +530,32 @@ func (p *Pack) newVPC(region, project, name string, isDefault bool) *resource.Re
 // isolate keeps the emulated subnets apart, which two managed bridges on one
 // host are not by themselves.
 //
-// What counts as foreign is a Scaleway question. Two Private Networks of one VPC
-// are routed to each other upstream when the VPC has routing enabled, so they
-// stay reachable here; everything else, another VPC or another project, is
-// rejected. Reconciled over every network because a new subnet changes what its
-// neighbours must keep out.
-//
-// A runtime with native isolation inverts the work: its networks reach nothing
-// until peered, so the question is no longer what to keep out but what to let
-// in, and the same reachability rule answers both.
+// What counts as foreign is a Scaleway question, and it is the only part
+// written here: two Private Networks of one VPC are routed to each other
+// upstream when the VPC has routing enabled, so they stay reachable;
+// everything else, another VPC or another project, is rejected. The
+// reconciliation itself — peer lists under native isolation, foreign blocks
+// otherwise, over every network because a new subnet changes what its
+// neighbours must keep out — is machine.ReconcileIsolation, shared with the
+// two other packs rather than copied a third time (#201 measured what the
+// copies cost).
 func (p *Pack) isolateNetworks(ctx context.Context) {
 	all := p.env.Store.List(kindPrivateNetwork, resource.Tenant{Provider: Name})
-
-	if peerer, ok := p.env.Machines.(machine.Peerer); ok && peerer.NativeIsolation() {
-		for _, pn := range all {
-			name := pn.Runtime[runtimeNetworkKey]
-			if name == "" {
-				continue
-			}
-			peers := make([]string, 0, len(all))
-			for _, other := range all {
-				if other.ID == pn.ID || other.Runtime[runtimeNetworkKey] == "" {
-					continue
-				}
-				if p.reachableFrom(pn, other) {
-					peers = append(peers, other.Runtime[runtimeNetworkKey])
-				}
-			}
-			if err := peerer.PeerNetworks(ctx, name, peers); err != nil {
-				p.logger().Error("could not peer the private network",
-					"private_network", pn.ID, "network", name, "error", err)
-			}
+	members := make([]machine.IsolationMember, len(all))
+	for i, pn := range all {
+		block, _ := pn.Attrs["subnet"].(string)
+		members[i] = machine.IsolationMember{
+			ID:      pn.ID,
+			Network: pn.Runtime[runtimeNetworkKey],
+			Block:   block,
 		}
-		// No group resync here: with native isolation the rule sets carry no
+	}
+	native, applied := machine.ReconcileIsolation(ctx, p.env.Machines, p.logger(), "private_network",
+		members, func(from, to int) bool { return p.reachableFrom(all[from], all[to]) })
+	if native || !applied {
+		// No group resync under native isolation: the rule sets carry no
 		// foreign blocks, so a subnet coming or going changes nothing in them.
 		return
-	}
-
-	isolator, ok := p.env.Machines.(machine.Isolator)
-	if !ok {
-		return
-	}
-	for _, pn := range all {
-		name := pn.Runtime[runtimeNetworkKey]
-		if name == "" {
-			continue
-		}
-		foreign := make([]string, 0, len(all))
-		for _, other := range all {
-			if other.ID == pn.ID || p.reachableFrom(pn, other) {
-				continue
-			}
-			if block, _ := other.Attrs["subnet"].(string); block != "" {
-				foreign = append(foreign, block)
-			}
-		}
-		if err := isolator.IsolateNetwork(ctx, name, foreign); err != nil {
-			p.logger().Error("could not isolate the private network",
-				"private_network", pn.ID, "network", name, "error", err)
-		}
 	}
 
 	// The rule sets carried by the machines say the same thing, and they are the

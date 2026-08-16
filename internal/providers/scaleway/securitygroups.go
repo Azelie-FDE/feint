@@ -493,8 +493,8 @@ func (p *Pack) deleteSecurityGroupRule(w http.ResponseWriter, r *http.Request) {
 // what keeps two concurrent reads from provisioning it twice; the store offers
 // no compare-and-set, and a duplicated default is a state no client expects.
 func (p *Pack) ensureDefaultSecurityGroup(zone, project string) *resource.Resource {
-	p.defaults.Lock()
-	defer p.defaults.Unlock()
+	unlock := p.lockDefaults()
+	defer unlock()
 
 	for _, res := range p.env.Store.List(kindSecurityGroup, resource.Tenant{Provider: Name, Project: project, Zone: zone}) {
 		if isProjectDefault(res) {
@@ -596,27 +596,20 @@ func (p *Pack) newRule(w http.ResponseWriter, group *resource.Resource, req rule
 	}
 
 	now := p.env.Now()
-	res := &resource.Resource{
-		ID:      p.env.NewID(),
-		Kind:    kindSecurityGroupRule,
-		Tenant:  group.Tenant,
-		State:   "available",
-		Created: now,
-		Updated: now,
-		Attrs: map[string]any{
-			"protocol":  protocol,
-			"direction": direction,
-			"action":    action,
-			// The SDK decodes ip_range into scw.IPNet, which requires a CIDR:
-			// a bare address makes the client fail on the response it just got.
-			"ip_range":       ipRange,
-			"dest_port_from": portOrNil(req.DestPortFrom),
-			"dest_port_to":   portOrNil(req.DestPortTo),
-			"position":       position,
-			"editable":       deref(req.Editable, true),
-		},
-		Runtime: map[string]string{runtimeGroupKey: group.ID},
+	res := resource.New(p.env.NewID(), kindSecurityGroupRule, group.Tenant, "available", now)
+	res.Attrs = map[string]any{
+		"protocol":  protocol,
+		"direction": direction,
+		"action":    action,
+		// The SDK decodes ip_range into scw.IPNet, which requires a CIDR:
+		// a bare address makes the client fail on the response it just got.
+		"ip_range":       ipRange,
+		"dest_port_from": portOrNil(req.DestPortFrom),
+		"dest_port_to":   portOrNil(req.DestPortTo),
+		"position":       position,
+		"editable":       deref(req.Editable, true),
 	}
+	res.Runtime = map[string]string{runtimeGroupKey: group.ID}
 	return res, true
 }
 

@@ -38,19 +38,12 @@ func (p *Pack) defaultDhcpOptions() *resource.Resource {
 		}
 	}
 	now := p.env.Now()
-	res := &resource.Resource{
-		ID:      newID("dopt", p.env.NewID()),
-		Kind:    kindDhcpOptions,
-		Tenant:  resource.Tenant{Provider: Name},
-		State:   "available",
-		Created: now,
-		Updated: now,
-		Attrs: map[string]any{
-			"Default":           true,
-			"DomainName":        regionName + ".compute.internal",
-			"DomainNameServers": []any{"OutscaleProvidedDNS"},
-			"Tags":              []any{},
-		},
+	res := resource.New(newID("dopt", p.env.NewID()), kindDhcpOptions, resource.Tenant{Provider: Name}, "available", now)
+	res.Attrs = map[string]any{
+		"Default":           true,
+		"DomainName":        regionName + ".compute.internal",
+		"DomainNameServers": []any{"OutscaleProvidedDNS"},
+		"Tags":              []any{},
 	}
 	p.env.Store.Put(res)
 	return res
@@ -156,15 +149,8 @@ func (p *Pack) createDhcpOptions(w http.ResponseWriter, r *http.Request) {
 		attrs["NtpServers"] = req.NtpServers
 	}
 
-	res := &resource.Resource{
-		ID:      newID("dopt", p.env.NewID()),
-		Kind:    kindDhcpOptions,
-		Tenant:  resource.Tenant{Provider: Name},
-		State:   "available",
-		Created: now,
-		Updated: now,
-		Attrs:   attrs,
-	}
+	res := resource.New(newID("dopt", p.env.NewID()), kindDhcpOptions, resource.Tenant{Provider: Name}, "available", now)
+	res.Attrs = attrs
 	p.env.Store.Put(res)
 
 	emulator.WriteJSON(w, http.StatusOK, map[string]any{
@@ -216,8 +202,8 @@ func (p *Pack) deleteDhcpOptions(w http.ResponseWriter, r *http.Request) {
 	// Under the addressing lock, which is what serialises this scan against
 	// updateNet re-pointing a Net between the check and the delete.
 	// TestADhcpOptionsSetDoesNotDeleteUnderANet fails without the guard.
-	p.addresses.Lock()
-	defer p.addresses.Unlock()
+	unlock := p.lockAddresses()
+	defer unlock()
 	for _, net := range p.env.Store.List(kindNet, resource.Tenant{Provider: Name}) {
 		if stringOf(net.Attrs["DhcpOptionsSetId"]) == req.DhcpOptionsSetID {
 			p.conflict(w, "the DHCP options set "+req.DhcpOptionsSetID+

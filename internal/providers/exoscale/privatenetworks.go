@@ -203,24 +203,17 @@ func (p *Pack) createPrivateNetwork(w http.ResponseWriter, r *http.Request) {
 	// stored: the VNI is read-modify-write over the store, the exact shape the
 	// barrage of #134 caught on this pack's elastic addresses.
 	// TestConcurrentAllocationsShareNothing fails without it.
-	p.addresses.Lock()
-	defer p.addresses.Unlock()
+	unlock := p.lockAddresses()
+	defer unlock()
 
 	now := p.env.Now()
-	res := &resource.Resource{
-		ID:      p.env.NewID(),
-		Kind:    kindPrivateNetwork,
-		Tenant:  resource.Tenant{Provider: Name},
-		State:   "present",
-		Created: now,
-		Updated: now,
-		Attrs: map[string]any{
-			"name": name,
-			// The VXLAN id their schema declares on every network. Lowest free,
-			// so it is stable for a client that stored it and returns to the
-			// pool when the network goes.
-			"vni": p.freeVNI(),
-		},
+	res := resource.New(p.env.NewID(), kindPrivateNetwork, resource.Tenant{Provider: Name}, "present", now)
+	res.Attrs = map[string]any{
+		"name": name,
+		// The VXLAN id their schema declares on every network. Lowest free,
+		// so it is stable for a client that stored it and returns to the
+		// pool when the network goes.
+		"vni": p.freeVNI(),
 	}
 	if d := stringOf(req.Description); d != "" {
 		res.Attrs["description"] = d
@@ -262,7 +255,7 @@ func (p *Pack) createPrivateNetwork(w http.ResponseWriter, r *http.Request) {
 // freeVNI hands out the lowest unused VXLAN id, starting at 1 as their schema's
 // exclusive minimum of 0 demands. Computed from what exists rather than
 // counted, so a deleted network's id returns to the pool. Callers hold
-// p.addresses across the read and the write.
+// p.lockAddresses() across the read and the write.
 func (p *Pack) freeVNI() int {
 	used := map[int]bool{}
 	for _, res := range p.env.Store.List(kindPrivateNetwork, resource.Tenant{Provider: Name}) {
@@ -326,48 +319,25 @@ func (p *Pack) ensureBackingNetwork(ctx context.Context, res *resource.Resource,
 // What counts as foreign is an Exoscale question, and the answer is simpler
 // than Scaleway's: every private network is its own VXLAN segment upstream, so
 // every other network is foreign — there is no VPC routing to let through in
-// this batch. A runtime with native isolation gets an empty peer list; one
-// whose networks are born joined gets every other block to keep out.
+// this batch, and the predicate below says exactly that. The reconciliation —
+// empty peer lists under native isolation, every managed block to keep out
+// otherwise — is machine.ReconcileIsolation, shared with the two other packs.
 func (p *Pack) isolatePrivateNetworks(ctx context.Context) {
 	all := p.env.Store.List(kindPrivateNetwork, resource.Tenant{Provider: Name})
-
-	if peerer, ok := p.env.Machines.(machine.Peerer); ok && peerer.NativeIsolation() {
-		for _, pn := range all {
-			name := pn.Runtime[runtimeNetworkKey]
-			if name == "" {
-				continue
-			}
-			if err := peerer.PeerNetworks(ctx, name, nil); err != nil {
-				p.logger().Error("could not isolate the private network",
-					"private-network", pn.ID, "network", name, "error", err)
-			}
+	members := make([]machine.IsolationMember, len(all))
+	for i, pn := range all {
+		block := ""
+		if dhcp, managed := rangeOf(pn); managed {
+			block = dhcp.prefix.Masked().String()
 		}
-		return
-	}
-
-	isolator, ok := p.env.Machines.(machine.Isolator)
-	if !ok {
-		return
-	}
-	for _, pn := range all {
-		name := pn.Runtime[runtimeNetworkKey]
-		if name == "" {
-			continue
-		}
-		foreign := make([]string, 0, len(all))
-		for _, other := range all {
-			if other.ID == pn.ID {
-				continue
-			}
-			if dhcp, managed := rangeOf(other); managed {
-				foreign = append(foreign, dhcp.prefix.Masked().String())
-			}
-		}
-		if err := isolator.IsolateNetwork(ctx, name, foreign); err != nil {
-			p.logger().Error("could not isolate the private network",
-				"private-network", pn.ID, "network", name, "error", err)
+		members[i] = machine.IsolationMember{
+			ID:      pn.ID,
+			Network: pn.Runtime[runtimeNetworkKey],
+			Block:   block,
 		}
 	}
+	machine.ReconcileIsolation(ctx, p.env.Machines, p.logger(), "private-network",
+		members, func(int, int) bool { return false })
 }
 
 // ---- Reads ------------------------------------------------------------------
@@ -664,7 +634,7 @@ func (p *Pack) attachInstanceToPrivateNetwork(w http.ResponseWriter, r *http.Req
 
 	// The instance is held for the read, the lease, and the runtime attach,
 	// like every lifecycle path of this pack; the address allocation is its own
-	// read-modify-write over every instance's leases and holds p.addresses
+	// read-modify-write over every instance's leases and holds p.lockAddresses()
 	// across the read and the write, which is what the barrage checks.
 	unlock := p.binding().Serialise(req.Instance.ID)
 	defer unlock()
@@ -684,14 +654,14 @@ func (p *Pack) attachInstanceToPrivateNetwork(w http.ResponseWriter, r *http.Req
 }
 
 // takeLease reserves an address of the network's range for the instance and
-// records the membership, under one hold of p.addresses: choosing from what
+// records the membership, under one hold of p.lockAddresses(): choosing from what
 // exists and storing the choice must be one critical section, or two attaches
 // interleaving there receive the same address — the defect the barrage of #134
 // found on this pack's elastic pool. TestConcurrentAllocationsShareNothing
 // fails without it.
 func (p *Pack) takeLease(w http.ResponseWriter, pn *resource.Resource, instanceID, requested string) (string, bool) {
-	p.addresses.Lock()
-	defer p.addresses.Unlock()
+	unlock := p.lockAddresses()
+	defer unlock()
 
 	dhcp, managed := rangeOf(pn)
 	leaseIP := ""
@@ -856,10 +826,10 @@ func (p *Pack) updatePrivateNetworkInstanceIP(w http.ResponseWriter, r *http.Req
 }
 
 // moveLease points an existing membership at a new address, under the same
-// hold of p.addresses as takeLease and for the same reason.
+// hold of p.lockAddresses() as takeLease and for the same reason.
 func (p *Pack) moveLease(w http.ResponseWriter, pn *resource.Resource, dhcp managedRange, instanceID, requested string) bool {
-	p.addresses.Lock()
-	defer p.addresses.Unlock()
+	unlock := p.lockAddresses()
+	defer unlock()
 
 	addr, err := netip.ParseAddr(requested)
 	if err != nil || !addr.Is4() {

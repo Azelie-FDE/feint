@@ -274,10 +274,10 @@ func (p *Pack) createNic(w http.ResponseWriter, r *http.Request) {
 	// Under the addressing lock, and the address reserved before release: a NIC
 	// takes an address in the Subnet exactly as a Vm does, and two creates must
 	// not pick the same one.
-	p.addresses.Lock()
+	unlock := p.lockAddresses()
 	place, err := p.placeInSubnet(req.SubnetID)
 	if err != nil {
-		p.addresses.Unlock()
+		unlock()
 		if errors.Is(err, errUnknownSubnet) {
 			p.notFound(w, "Subnet", req.SubnetID)
 		} else {
@@ -286,26 +286,19 @@ func (p *Pack) createNic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := p.env.Now()
-	nic := &resource.Resource{
-		ID:      newID("eni", p.env.NewID()),
-		Kind:    kindNic,
-		Tenant:  resource.Tenant{Provider: Name},
-		State:   "available",
-		Created: now,
-		Updated: now,
-		Attrs: map[string]any{
-			"SubnetId":    place.SubnetID,
-			"NetId":       place.NetID,
-			"PrivateIp":   place.Address.String(),
-			"Description": req.Description,
-			"State":       "available",
-		},
+	nic := resource.New(newID("eni", p.env.NewID()), kindNic, resource.Tenant{Provider: Name}, "available", now)
+	nic.Attrs = map[string]any{
+		"SubnetId":    place.SubnetID,
+		"NetId":       place.NetID,
+		"PrivateIp":   place.Address.String(),
+		"Description": req.Description,
+		"State":       "available",
 	}
 	if len(req.SecurityGroupIDs) > 0 {
 		nic.Attrs["SecurityGroupIds"] = req.SecurityGroupIDs
 	}
 	p.env.Store.Put(nic)
-	p.addresses.Unlock()
+	unlock()
 
 	emulator.WriteJSON(w, http.StatusOK, map[string]any{
 		"Nic":             p.storedNicView(nic),

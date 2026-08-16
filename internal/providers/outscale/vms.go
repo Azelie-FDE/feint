@@ -10,7 +10,6 @@ import (
 	"github.com/stephrobert/feint/internal/core/cloudinit"
 	"github.com/stephrobert/feint/internal/core/emulator"
 	"github.com/stephrobert/feint/internal/core/resource"
-	"github.com/stephrobert/feint/internal/core/store"
 )
 
 // The Vm is Outscale's server. Field names and shapes come from the SDK: Vm for
@@ -315,24 +314,17 @@ func (p *Pack) createVms(w http.ResponseWriter, r *http.Request) {
 // batch. Releasing between two Vms of one batch would let another create take an
 // address this one is about to use, so the whole batch allocates at once.
 func (p *Pack) allocateVms(req createVmsRequest, count int, now time.Time) ([]*resource.Resource, error) {
-	p.addresses.Lock()
-	defer p.addresses.Unlock()
+	unlock := p.lockAddresses()
+	defer unlock()
 
 	created := make([]*resource.Resource, 0, count)
 	for range count {
-		res := &resource.Resource{
-			ID:      newVMID(p.env.NewID()),
-			Kind:    kindVM,
-			Tenant:  resource.Tenant{Provider: Name},
-			State:   stateStopped,
-			Created: now,
-			Updated: now,
-			Attrs: map[string]any{
-				"ImageId":              req.ImageID,
-				"VmType":               orDefault(req.VMType, defaultVMType),
-				"DeletionProtection":   boolOr(req.DeletionProtection, false),
-				"NestedVirtualization": boolOr(req.NestedVirtualization, false),
-			},
+		res := resource.New(newVMID(p.env.NewID()), kindVM, resource.Tenant{Provider: Name}, stateStopped, now)
+		res.Attrs = map[string]any{
+			"ImageId":              req.ImageID,
+			"VmType":               orDefault(req.VMType, defaultVMType),
+			"DeletionProtection":   boolOr(req.DeletionProtection, false),
+			"NestedVirtualization": boolOr(req.NestedVirtualization, false),
 		}
 		// The Subnet the client asked for, resolved before anything is stored: a
 		// Vm placed nowhere is not a Vm the client asked for. Reading it here,
@@ -577,43 +569,27 @@ func (p *Pack) transition(w http.ResponseWriter, r *http.Request, change func(*r
 // transitionOne applies one state change to one VM, holding that target for the
 // whole read, run and write.
 //
-// The lock is what makes the read worth anything. The runtime call is outside
-// the store lock on purpose, and Update only refuses to write back a resource
-// that is gone: it does not order two writers. Two concurrent StartVms on one VM
-// each launched a container, the second failed on the name the first had taken,
-// and the API described as stopped a machine that was running.
+// The mechanics are machine.Binding.Transition, shared with the Exoscale
+// pack's transitionInstance rather than written a second time: the lock is
+// what makes the read worth anything, the runtime call runs outside the store
+// lock, and the write-back is conditional so a delete racing this loop wins
+// instead of being undone. The resource Transition reads is re-read under the
+// lock rather than reused from the resolution loop, because that copy was
+// taken before it: deciding "already running" from a stale state is how the
+// short-circuit above stops short-circuiting.
 //
-// The resource is re-read here rather than reused from the resolution loop,
-// because that copy was taken before the lock: deciding "already running" from a
-// stale state is how the short-circuit above stops short-circuiting.
+// What stays here is the shape a client observes: the VmStateInfo row with the
+// previous state beside the new one, and a target deleted mid-transition
+// silently dropped from the answer.
 func (p *Pack) transitionOne(id string, change func(*resource.Resource) string) (map[string]any, bool) {
-	unlock := p.binding().Serialise(id)
-	defer unlock()
-
-	res, ok := p.env.Store.Get(Name, kindVM, id)
-	if !ok {
-		return nil, false
-	}
-
-	previous := res.State
-	// The runtime work runs outside the store lock. Launching a container takes
-	// tens of seconds, and holding the write lock for that would queue every
-	// other request behind one machine starting.
-	current := change(res)
-
-	// The result is applied atomically. Put replaces the whole resource, so it
-	// silently discarded anything another request had written in the meantime —
-	// a delete racing this loop used to be undone, and the VM came back.
-	err := p.env.Store.Update(Name, kindVM, id, func(stored *resource.Resource) error {
-		stored.State = res.State
-		stored.Runtime = res.Runtime
-		stored.Attrs = res.Attrs
-		stored.Updated = p.env.Now()
-		return nil
+	var previous, current string
+	err := p.binding().Transition(p.env.Store, p.env.Now, kindVM, id, func(res *resource.Resource) {
+		previous = res.State
+		current = change(res)
 	})
-	if errors.Is(err, store.ErrNotFound) {
-		// Deleted while its machine was transitioning. Not an error: the caller
-		// asked for a state this resource no longer has.
+	if err != nil {
+		// Missing, or deleted while its machine was transitioning. Not an
+		// error: the caller asked for a state this resource no longer has.
 		return nil, false
 	}
 	return map[string]any{
@@ -731,6 +707,21 @@ func (p *Pack) deleteVms(w http.ResponseWriter, r *http.Request) {
 		"Vms":             deleted,
 		"ResponseContext": p.context(),
 	})
+}
+
+// Gone reports a resource this pack keeps in the store although its API says
+// it no longer exists. The terminated Vm is the one case: the record stays
+// readable because the Terraform provider polls ReadVms until it observes
+// "terminated" (TestATerminatedVmStaysReadable), but the machine is destroyed
+// and holds nothing — upstream releases the private address at termination.
+//
+// This is the pack's word on liveness, in the pack because the vocabulary is
+// the provider's (rule 5 keeps it out of the core). Two consumers must read
+// the same answer or the instrument convicts the innocent: the barrage sweep
+// takes it as its predicate, and subnetAllocator skips exactly what it names,
+// so what the invariant excuses and what the pool reuses cannot disagree.
+func Gone(res *resource.Resource) bool {
+	return res.Kind == kindVM && res.State == stateTerminated
 }
 
 // vmView renders a Vm. Only fields the pack actually knows are emitted: a

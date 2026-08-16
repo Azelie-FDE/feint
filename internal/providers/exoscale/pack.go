@@ -18,12 +18,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/stephrobert/feint/internal/core/cloudinit"
 	"github.com/stephrobert/feint/internal/core/emulator"
 	"github.com/stephrobert/feint/internal/core/resource"
+	"github.com/stephrobert/feint/internal/core/serialise"
 )
 
 // Name is the provider key.
@@ -51,20 +51,23 @@ const (
 // Pack implements emulator.Pack for Exoscale.
 type Pack struct {
 	env *emulator.Env
-	// addresses serializes elastic IP allocation, which is read-modify-write
-	// over the store: freeElasticAddress rebuilds the used set from what exists,
-	// answers the lowest free address, and the caller then stores it. Two
-	// requests interleaving there receive the same address.
-	//
-	// Not a precaution. The barrage of #134 found it on its first run — three
-	// addresses handed to two elastic IPs each, out of sixteen creates — and it
-	// is the same defect the Scaleway pack fixed for its own pools long ago and
-	// this one never received. CLAUDE.md names that shape: written twice, fixed
-	// once, alive in the other copy.
-	//
-	// TestAnExoscaleBarrageLeavesTheStoreCoherent fails without this.
-	addresses sync.Mutex
 }
+
+// lockAddresses serializes elastic IP and lease allocation, which is
+// read-modify-write over the store: freeElasticAddress rebuilds the used set
+// from what exists, answers the lowest free address, and the caller then
+// stores it. Two requests interleaving there receive the same address.
+//
+// Not a precaution. The barrage of #134 found it on its first run — three
+// addresses handed to two elastic IPs each, out of sixteen creates — and it
+// was the same defect the Scaleway pack fixed for its own pools long ago and
+// this one never received. CLAUDE.md names that shape: written twice, fixed
+// once, alive in the other copy — which is why the lock now lives in
+// core/serialise, shared with every pack, instead of being a mutex each one
+// remembers to grow.
+//
+// TestAnExoscaleBarrageLeavesTheStoreCoherent fails without this.
+func (p *Pack) lockAddresses() func() { return serialise.Lock(Name + "/addresses") }
 
 // New returns an Exoscale pack backed by env.
 func New(env *emulator.Env) *Pack { return &Pack{env: env} }
@@ -698,32 +701,25 @@ func (p *Pack) createInstance(w http.ResponseWriter, r *http.Request) {
 
 	now := p.env.Now()
 	id := p.env.NewID()
-	res := &resource.Resource{
-		ID:      id,
-		Kind:    kindInstance,
-		Tenant:  resource.Tenant{Provider: Name},
-		State:   stoppedState,
-		Created: now,
-		Updated: now,
-		Attrs: map[string]any{
-			"name":          req.Name,
-			"instance-type": map[string]any{"id": req.InstanceType.ID},
-			"template":      map[string]any{"id": req.Template.ID},
-			"disk-size":     req.DiskSize,
-			// Echoed back because a client that attached them expects to read
-			// them, and because their absence is not "no keys" to a client, it
-			// is a missing field.
-			"ssh-keys":             p.sshKeyRefs(req.keyNames()),
-			"public-ip-assignment": orDefault(req.PublicIPAssignment, "inet4"),
-			"secureboot-enabled":   boolOr(req.SecurebootEnabled, false),
-			"tpm-enabled":          boolOr(req.TPMEnabled, false),
-			// Present even when empty — {} was measured on an instance created
-			// with no label, and an absent key is a different claim.
-			"labels": labelsToAttr(req.Labels),
-			// A stable address derived from the identifier: the real API
-			// publishes one per instance, and two runs must answer the same.
-			"mac-address": macAddressOf(id),
-		},
+	res := resource.New(id, kindInstance, resource.Tenant{Provider: Name}, stoppedState, now)
+	res.Attrs = map[string]any{
+		"name":          req.Name,
+		"instance-type": map[string]any{"id": req.InstanceType.ID},
+		"template":      map[string]any{"id": req.Template.ID},
+		"disk-size":     req.DiskSize,
+		// Echoed back because a client that attached them expects to read
+		// them, and because their absence is not "no keys" to a client, it
+		// is a missing field.
+		"ssh-keys":             p.sshKeyRefs(req.keyNames()),
+		"public-ip-assignment": orDefault(req.PublicIPAssignment, "inet4"),
+		"secureboot-enabled":   boolOr(req.SecurebootEnabled, false),
+		"tpm-enabled":          boolOr(req.TPMEnabled, false),
+		// Present even when empty — {} was measured on an instance created
+		// with no label, and an absent key is a different claim.
+		"labels": labelsToAttr(req.Labels),
+		// A stable address derived from the identifier: the real API
+		// publishes one per instance, and two runs must answer the same.
+		"mac-address": macAddressOf(id),
 	}
 	if req.UserData != "" {
 		res.Attrs["user-data"] = req.UserData
@@ -742,11 +738,11 @@ func (p *Pack) createInstance(w http.ResponseWriter, r *http.Request) {
 	//
 	// TestAnInstanceIsGivenAPublicAddressAtCreation fails without this.
 	if assignment, _ := res.Attrs["public-ip-assignment"].(string); assignment != "none" {
-		p.addresses.Lock()
+		unlock := p.lockAddresses()
 		if ip, ok := p.freeElasticAddress(); ok {
 			res.Attrs["public-ip"] = ip
 		}
-		p.addresses.Unlock()
+		unlock()
 	}
 	if ids := refIDs(req.AntiAffinityGroups); len(ids) > 0 {
 		res.Attrs[attrAntiAffinityGroupIDs] = ids
