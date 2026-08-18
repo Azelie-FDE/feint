@@ -241,8 +241,14 @@ func (p *Pack) storedNicView(nic *resource.Resource) map[string]any {
 	// and the destroy unable to finish.
 	// TestAnAttachedNicReportsTheLinkStateTheProviderWaitsFor fails without this.
 	if vmID := stringOf(nic.Attrs["LinkVmId"]); vmID != "" {
+		// The flag is the stored one, never a constant: this line published
+		// `false` whatever UpdateNic had stored, so the one request that sets
+		// it was denied by every read that followed — the same shape as the
+		// constant Tags before #99 (#299).
+		// TestDeleteOnVmDeletionRoundTripsThroughUpdateNic fails without it.
+		flag, _ := nic.Attrs["DeleteOnVmDeletion"].(bool)
 		out["LinkNic"] = map[string]any{
-			"DeleteOnVmDeletion": false,
+			"DeleteOnVmDeletion": flag,
 			"DeviceNumber":       numOf(nic.Attrs["DeviceNumber"]),
 			"LinkNicId":          stringOf(nic.Attrs["LinkNicId"]),
 			"State":              "attached",
@@ -386,11 +392,35 @@ func (p *Pack) linkNic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	linkID := "eni-attach-" + strings.TrimPrefix(nic.ID, "eni-")
-	nic.Attrs["LinkVmId"] = req.VMID
-	nic.Attrs["DeviceNumber"] = *req.DeviceNumber
-	nic.Attrs["LinkNicId"] = linkID
-	nic.Attrs["State"] = "in-use"
-	if !p.env.Store.Commit(nic, p.env.Now()) {
+	// The holder check re-runs on the stored interface, under the lock, and the
+	// write happens in the same critical section: as a Get-check-Commit sequence
+	// this erased a concurrent write to another field of the same NIC — a tag,
+	// an updated description — after its 200 (#295).
+	var holder string
+	err := p.env.Store.Update(Name, kindNic, req.NicID, func(stored *resource.Resource) error {
+		if held := stringOf(stored.Attrs["LinkVmId"]); held != "" {
+			holder = held
+			return errNicAttached
+		}
+		stored.Attrs["LinkVmId"] = req.VMID
+		stored.Attrs["DeviceNumber"] = *req.DeviceNumber
+		stored.Attrs["LinkNicId"] = linkID
+		// False at attach time, and that is the SDK's shape rather than a
+		// choice: LinkNicRequest (osc-sdk-go client.gen.go) carries no
+		// DeleteOnVmDeletion, so a fresh attachment can only start at the
+		// default — false, which is also what the 2026-08-08 lifecycle sweep
+		// recorded on a freshly linked interface. UpdateNic's LinkNicToUpdate
+		// is the one door that changes it (#299).
+		stored.Attrs["DeleteOnVmDeletion"] = false
+		stored.Attrs["State"] = "in-use"
+		stored.Updated = p.env.Now()
+		return nil
+	})
+	switch {
+	case errors.Is(err, errNicAttached):
+		p.conflict(w, "the network interface "+nic.ID+" is already attached to "+holder)
+		return
+	case err != nil:
 		p.notFound(w, "network interface", req.NicID)
 		return
 	}
@@ -413,12 +443,23 @@ func (p *Pack) unlinkNic(w http.ResponseWriter, r *http.Request) {
 		if stringOf(nic.Attrs["LinkNicId"]) != req.LinkNicID {
 			continue
 		}
-		delete(nic.Attrs, "LinkVmId")
-		delete(nic.Attrs, "DeviceNumber")
-		delete(nic.Attrs, "LinkNicId")
-		nic.Attrs["State"] = "available"
-		if !p.env.Store.Commit(nic, p.env.Now()) {
-			p.notFound(w, "network interface", nic.ID)
+		// The link is re-found on the stored interface: the List above read a
+		// clone, and detaching over it wholesale erased a concurrent write to
+		// another field after its 200 (#295).
+		err := p.env.Store.Update(Name, kindNic, nic.ID, func(stored *resource.Resource) error {
+			if stringOf(stored.Attrs["LinkNicId"]) != req.LinkNicID {
+				return errNicLinkMoved
+			}
+			delete(stored.Attrs, "LinkVmId")
+			delete(stored.Attrs, "DeviceNumber")
+			delete(stored.Attrs, "LinkNicId")
+			delete(stored.Attrs, "DeleteOnVmDeletion")
+			stored.Attrs["State"] = "available"
+			stored.Updated = p.env.Now()
+			return nil
+		})
+		if err != nil {
+			p.notFound(w, "network interface attachment", req.LinkNicID)
 			return
 		}
 		emulator.WriteJSON(w, http.StatusOK, map[string]any{"ResponseContext": p.context()})
@@ -427,20 +468,45 @@ func (p *Pack) unlinkNic(w http.ResponseWriter, r *http.Request) {
 	p.notFound(w, "network interface attachment", req.LinkNicID)
 }
 
-// detachNicsOf releases every secondary interface attached to a Vm, leaving the
-// interface itself in place. Called from the Vm delete path.
+// detachNicsOf releases every secondary interface attached to a Vm — or
+// deletes it, when its attachment says so. Called from the Vm delete path.
+//
+// The flag is the SDK's own contract, on LinkNic.DeleteOnVmDeletion: "If true,
+// the NIC is deleted when the VM is terminated. If false, the NIC is detached
+// from the VM" (osc-sdk-go client.gen.go). Detaching regardless would make the
+// flag a field that round-trips perfectly and governs nothing, the exact shape
+// #212 names. TestATrueDeleteOnVmDeletionDeletesTheNicWithItsVm fails without
+// the delete branch (#299).
 func (p *Pack) detachNicsOf(vmID string) {
 	for _, nic := range p.env.Store.List(kindNic, resource.Tenant{Provider: Name}) {
 		if stringOf(nic.Attrs["LinkVmId"]) != vmID {
 			continue
 		}
-		delete(nic.Attrs, "LinkVmId")
-		delete(nic.Attrs, "DeviceNumber")
-		delete(nic.Attrs, "LinkNicId")
-		nic.Attrs["State"] = "available"
-		p.env.Store.Commit(nic, p.env.Now())
+		if goes, _ := nic.Attrs["DeleteOnVmDeletion"].(bool); goes {
+			p.env.Store.Delete(Name, kindNic, nic.ID)
+			continue
+		}
+		// Re-checked under the lock, same reason as detachVolumesOf (#295).
+		_ = p.env.Store.Update(Name, kindNic, nic.ID, func(stored *resource.Resource) error {
+			if stringOf(stored.Attrs["LinkVmId"]) != vmID {
+				return errNicLinkMoved
+			}
+			delete(stored.Attrs, "LinkVmId")
+			delete(stored.Attrs, "DeviceNumber")
+			delete(stored.Attrs, "LinkNicId")
+			delete(stored.Attrs, "DeleteOnVmDeletion")
+			stored.Attrs["State"] = "available"
+			stored.Updated = p.env.Now()
+			return nil
+		})
 	}
 }
+
+// The refusals the NIC link paths answer from inside the store lock (#295).
+var (
+	errNicAttached  = errors.New("the interface is already attached")
+	errNicLinkMoved = errors.New("the link is no longer what the caller resolved")
+)
 
 // publicDNSName renders the name the real cloud derives from a public address:
 // ows-203-0-113-1.<region>.compute.outscale.com, measured. Empty for no address,
