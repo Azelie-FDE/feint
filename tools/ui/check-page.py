@@ -511,6 +511,10 @@ def assert_page(page: Page, endpoint: str, checks: Checks, opened_product: str |
 
     # A resource the client created, with its identifier and its attributes,
     # inside a card that is closed by default.
+    checks.truthy(
+        "the fixture created something for the inventory to show",
+        bool(resources["resources"]),
+    )
     if resources["resources"]:
         first = resources["resources"][0]
         found = any_text_equals(page, "#inventory-groups .res-id", first["id"])
@@ -533,6 +537,10 @@ def assert_page(page: Page, endpoint: str, checks: Checks, opened_product: str |
         declined = [
             op for op in declined if f"{op['provider']} / {op['product']}" == opened_product
         ]
+    checks.truthy(
+        f"the opened product {opened_product!r} still declines something with a reason",
+        bool(declined),
+    )
     if declined:
         reason = declined[0]["reason"]
         shown = any_text_equals(page, "#upstream-rows .op-reason", reason.strip())
@@ -543,16 +551,36 @@ def assert_page(page: Page, endpoint: str, checks: Checks, opened_product: str |
 
     # The call log: a call that went through, and the field no handler read.
     trace = get_json(f"{endpoint}/_feint/trace")["exchanges"]
+    checks.truthy("the fixture's calls reached the trace", bool(trace))
     if trace:
         last = trace[-1]
         path_shown = any_text_equals(page, "#log .path", last["path"])
         checks.truthy(f"the log shows the call to {last['path']}", path_shown)
+    # Asserted rather than skipped when empty. The fixture picks its unread
+    # field on purpose, and the pick expires: screenshots.sh sent
+    # placement_group for a year because no handler read it, and #285 made a
+    # handler read it. That change was loud only because an unknown group is a
+    # 400 and curl -sf died; a field that simply starts being read is silent,
+    # and this branch would have stopped checking anything without a word.
+    # Failing here says the fixture needs a new field, which is a two-minute
+    # edit, instead of leaving the page's own defect report unproven.
     unread = [x for x in trace if x.get("unread")]
+    checks.truthy(
+        "the fixture still sends a field no handler reads",
+        bool(unread),
+    )
     if unread:
         field_name = unread[0]["unread"][0]
         shown = any_text_contains(page, "#log .verdict.unread .fields", field_name)
         checks.truthy(f"the log names the unread field {field_name!r}", shown)
+    # Expires the day somebody mounts CreateNatService, which is the point:
+    # the fixture then needs another unmounted route, and a red leg says so
+    # where a skipped assertion would not.
     missing = [x for x in trace if not x.get("mounted")]
+    checks.truthy(
+        "the fixture still calls a route nobody mounts",
+        bool(missing),
+    )
     if missing:
         shown = any_text_equals(page, "#log .op", "no route mounted")
         checks.truthy("the log says which call found no route mounted", shown)
