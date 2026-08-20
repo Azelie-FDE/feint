@@ -230,6 +230,47 @@ what this project is judged on: **a response shape a client can observe**, and
 
 ### Fixed
 
+- **Attaching a private NIC no longer queues every machine behind the slowest
+  one** (#348). Six attachments on the Scaleway example stack under
+  `--vm incus-ovn` took 26s, 31s, 42s, 52s, 63s and 73s — a flat ten seconds
+  each, which is one machine's work paid again by every machine behind it. Past
+  the client's minute the apply gives up and retries, and the retry meets the
+  interface its own first attempt created: *the server is already attached to
+  this private network*. The driver held one package-level mutex across every
+  call it makes into the machine; it now takes the repository's own per-target
+  lock, keyed by machine, which is what the name collision it guards against
+  has always been scoped to. Measured on `main` without this branch: the same
+  slope, so the queue predates it and was merely unreachable behind #341.
+- **A full `incus-ovn` conformance pass no longer races the daemon into
+  deleting a firewall chain twice** (#341). The failure — `Failed deleting
+  nftables chain "fwd.feint-uplink": No such file or directory`, killing the
+  outscale-tofu suite — reproduces from a **clean station**, so the "state
+  accumulated across runs" reading was only half right. Measured with `incus
+  monitor` through a whole pass: `feint clean` at the end of the oapi-cli suite
+  deletes the uplink, then OpenTofu's default parallelism recreates two subnets
+  and a default machine network at once. A network `PUT` on the uplink and an
+  OVN network `POST` attached to it both make the daemon rebuild the uplink's
+  nftables firewall, and Incus' `removeChains` is a snapshot-then-delete with
+  no lock shared between those two paths — so the loser's chain is deleted by
+  the concurrent operation *between its own snapshot and its delete*. `uplinkMu`
+  now serialises every operation that makes the daemon rebuild the uplink, the
+  `network create` included.
+- **A deleted OVN network takes its delegated block off the uplink** (#341).
+  `RemoveNetwork` never withdrew the route, so one pass accumulated nine of
+  them — the seven the issue reported were not the residue of seven runs. An
+  uplink left behind by a dead run is also adopted once per process, dropping
+  the routes of networks that no longer exist, and an uplink held by a **live**
+  emulator is refused rather than shared: sharing it across processes is the
+  same unlocked corruption by another name.
+- **`feint doctor` asks whether a DHCP service outlives its network, not its
+  interface** (#342). It answered `ok` while an orphan held `10.50.2.1` and
+  broke the next run's conformance, because it looked for a service whose
+  interface was gone — and there the interface had survived *alongside* its
+  service. Both had outlived the network, which is the question nobody asked.
+  A leftover is now a red line naming the block and the pid, `feint clean` kills
+  the service and **says what it will not touch** — an unlabelled bridge is not
+  demonstrably ours — and every green line of `doctor` was re-read against what
+  it actually measured.
 - **An ssh conformance suite refuses to start when the emulator holds none of
   the images it boots, and the runtime proof builds them** (#335).
   `runtime-proof.yml` failed on its *Scaleway ssh suite* step on five
