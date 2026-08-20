@@ -196,6 +196,89 @@ what this project is judged on: **a response shape a client can observe**, and
 
 ### Fixed
 
+- **An ssh conformance suite refuses to start when the emulator holds none of
+  the images it boots, and the runtime proof builds them** (#335).
+  `runtime-proof.yml` failed on its *Scaleway ssh suite* step on five
+  consecutive scheduled nights, 2026-08-16 to 2026-08-20, on both legs. The fix
+  was printed in its own log every one of those nights — `WARN no image of ours
+  for this system, booting the upstream one … fix="feint images"` — and nothing
+  ran it: the subcommand appears in no step of that workflow and in no line of
+  `mise run conformance:ssh`.
+
+  Reproduced before being fixed, on a station that held the images, by deleting
+  the five `feint/*` aliases and putting them back afterwards: the same suite
+  passed in 21 seconds with them and failed in 93 without, on the same sentence
+  CI had been printing. The workflow now runs `feint images` before it starts
+  the emulator, and `tools/conformance/guard.sh` gained `guard_images`, which
+  the three ssh suites call before they register a key: it reads `.machines`
+  from `/_feint/health`, asks `feint images --check` about that runtime, and
+  refuses in a twentieth of a second naming the command, instead of failing
+  ninety seconds later on "no ssh daemon answered", which blames the address.
+  The guard is in the shared file, not in each suite, for the reason CLAUDE.md
+  gives: a control copied three times is one the fourth forgets. Falsified by
+  `tools/falsify/specs/ssh-suite-needs-its-images.json`, five mutations,
+  including the one where a suite keeps the guard and stops calling it.
+
+  **Why the fallback stopped being a fallback**, which is the part worth
+  keeping. #203 chose to boot the upstream image when the emulator holds none of
+  its own, deliberately, so a first contact still works. #202 then gave a
+  machine exactly the one address its provider publishes, on a routed NIC with
+  no NAT. The two are fine apart and not together: measured on 2026-08-20, an
+  upstream image's cloud-init dies on `Temporary failure resolving
+  'archive.ubuntu.com'`, `openssh-server` never installs, and nothing ever
+  listens on port 22. The emulator's warning said "the machine installs an ssh
+  daemon at first boot and needs outbound network to do it", which was true when
+  it was written and had quietly become a description of something that cannot
+  happen. It now says what does happen.
+
+  This also unblocks the counter of #125: its promotion criterion is a run of
+  consecutive green scheduled nights, so while this stayed broken that number
+  was pinned at zero by construction and nothing said so.
+
+- **The frozen CLI surface is read from the flag sets the binary registers, not
+  from the help it prints** (#334). `feint proxy --intercept` shipped in v0.9.0:
+  the binary accepted it, `feint proxy --help` rendered it, and
+  `internal/cli/testdata/frozen/cli.json` did not list it, for six days. That
+  fixture is the surface #132 froze so a pipeline outside this repository can
+  key on it. The cause was the observation itself: it parsed the rendered `feint
+  --help`, so it recorded what the help *claimed*. The missing flag was the
+  cheap half. A flag **deleted** from a flag set while its help line survived
+  would have kept the same gate green, and that is the direction that breaks a
+  consumer.
+
+  The surface now comes from `flag.FlagSet.VisitAll`, through one seam every
+  verb builds its flags with (`internal/cli/flagset.go`). The help keeps a
+  promise, but as an assertion with a subject of its own:
+  `TestTheHelpNamesEveryFlagTheBinaryAccepts` compares the two lists in both
+  directions, so a flag the binary accepts and no help block names fails, and a
+  help block naming a flag no flag set registers fails too. Falsified in both
+  directions by `tools/falsify/specs/frozen-cli-surface.json`, seven mutations,
+  each replayed against the test that has to bite.
+
+- **The CLI surface is version 5, and 24 flags the binary always accepted are
+  visible in it for the first time** (#334). What moved is the observation, not
+  the binary: `--intercept` and `--expose-to-network` on `proxy`, `--shapes` and
+  `--expose-to-network` on `serve`, `--check` on `version`, the six `serve`
+  flags `start` really takes, three on `evidence` and ten on `docs`. Three
+  entries left, and all three were the parser's: `--version` and `-v` under
+  `version`, which are aliases of the verb rather than flags of it (a reader who
+  typed `feint version --version` was answered `flag provided but not defined`),
+  and `--state` under `snapshot`, which came from a sentence about `serve`.
+  `snapshot` is now keyed per flag set — `snapshot save`, `snapshot load`,
+  `snapshot list` — which is what says `--force` belongs to `save` alone.
+
+  `feint --help` gained every flag it was hiding, including the two
+  `--expose-to-network` switches, which are the ones a reader most needs to meet
+  before setting them.
+
+- **`docs/proxy.md` stopped refusing a tool this repository ships** (#334).
+  The page told the reader that interception "is #76 and deliberately not this
+  tool" while `docs/limits.md` sent that same reader there to use it. `feint
+  proxy --intercept` has existed since v0.9.0; the page now documents it, with
+  what it mints, what it prints, and the one thing it will not do: it installs
+  nothing in the system trust store and never edits the operator's
+  `/etc/hosts`. #76 and #92 are closed as delivered.
+
 - **A stack applied on every pull request pins the provider that answered, and
   a stack CI does not apply says why** (#325's table, first day). The generated
   client page exposed two things nothing had said before:

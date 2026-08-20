@@ -210,6 +210,96 @@ change ni l'un ni l'autre a sa place dans `git log`.
 
 ### Corrigé
 
+- **Une suite de conformité ssh refuse de démarrer quand l'émulateur ne détient
+  aucune des images qu'elle démarre, et la preuve runtime les construit**
+  (#335). `runtime-proof.yml` échouait sur son étape *Scaleway ssh suite* cinq
+  nuits planifiées d'affilée, du 2026-08-16 au 2026-08-20, sur les deux jambes.
+  Le correctif était imprimé dans son propre journal chacune de ces nuits :
+  `WARN no image of ours for this system, booting the upstream one … fix="feint
+  images"`, et rien ne l'exécutait. La sous-commande n'apparaît dans aucune
+  étape de ce workflow ni dans aucune ligne de `mise run conformance:ssh`.
+
+  Reproduit avant d'être corrigé, sur une station qui détenait les images, en
+  supprimant les cinq alias `feint/*` puis en les remettant : la même suite est
+  passée en 21 secondes avec eux et a échoué en 93 sans, sur la phrase même que
+  la CI imprimait. Le workflow lance désormais `feint images` avant de démarrer
+  l'émulateur, et `tools/conformance/guard.sh` a gagné `guard_images`, que les
+  trois suites ssh appellent avant d'enregistrer une clé : il lit `.machines`
+  sur `/_feint/health`, interroge `feint images --check` sur ce runtime, et
+  refuse en un vingtième de seconde en nommant la commande, au lieu d'échouer
+  quatre-vingt-dix secondes plus tard sur « no ssh daemon answered », qui
+  accuse l'adresse. La garde vit dans le fichier partagé, pas dans chaque
+  suite, pour la raison que donne CLAUDE.md : un contrôle recopié trois fois
+  est un contrôle que la quatrième oublie. Falsifié par
+  `tools/falsify/specs/ssh-suite-needs-its-images.json`, cinq mutations, dont
+  celle où une suite garde la garde et cesse de l'appeler.
+
+  **Pourquoi le repli avait cessé d'en être un**, et c'est la partie qui mérite
+  d'être retenue. #203 a choisi de démarrer l'image amont quand l'émulateur ne
+  détient aucune des siennes, délibérément, pour qu'un premier contact
+  fonctionne. #202 a ensuite donné à une machine exactement la seule adresse que
+  publie son fournisseur, sur une NIC routée sans NAT. Les deux vont bien
+  séparément et pas ensemble : mesuré le 2026-08-20, le cloud-init d'une image
+  amont meurt sur `Temporary failure resolving 'archive.ubuntu.com'`,
+  `openssh-server` ne s'installe jamais, et rien n'écoute sur le port 22.
+  L'avertissement de l'émulateur disait « la machine installe un démon ssh au
+  premier démarrage et a besoin du réseau sortant pour cela », ce qui était vrai
+  à l'écriture et était devenu la description d'un événement impossible. Il dit
+  maintenant ce qui se produit vraiment.
+
+  Cela débloque aussi le compteur de #125 : son critère de promotion est une
+  série de nuits planifiées vertes consécutives, donc tant que ceci restait
+  cassé ce nombre était bloqué à zéro par construction, et rien ne le disait.
+
+- **La surface CLI gelée est lue depuis les jeux de drapeaux que le binaire
+  enregistre, plus depuis l'aide qu'il imprime** (#334). `feint proxy
+  --intercept` est parti en v0.9.0 : le binaire l'acceptait, `feint proxy
+  --help` l'affichait, et `internal/cli/testdata/frozen/cli.json` ne le listait
+  pas, six jours durant. Cette fixture est la surface que #132 a gelée pour
+  qu'un pipeline extérieur à ce dépôt puisse s'y fier. La cause tenait à
+  l'observation elle-même : elle parsait l'aide rendue par `feint --help`, donc
+  elle consignait ce que l'aide *prétendait*. Le drapeau manquant n'était que la
+  moitié la moins chère. Un drapeau **retiré** d'un jeu alors que sa ligne
+  d'aide survit aurait laissé le même gate au vert, et c'est la direction qui
+  casse un consommateur.
+
+  La surface vient désormais de `flag.FlagSet.VisitAll`, par une couture unique
+  où chaque verbe construit ses drapeaux (`internal/cli/flagset.go`). L'aide
+  garde une promesse, mais sous la forme d'un contrôle qui a son propre sujet :
+  `TestTheHelpNamesEveryFlagTheBinaryAccepts` compare les deux listes dans les
+  deux sens, de sorte qu'un drapeau accepté par le binaire et nommé par aucun
+  bloc d'aide échoue, et qu'un bloc d'aide nommant un drapeau qu'aucun jeu
+  n'enregistre échoue aussi. Falsifié dans les deux sens par
+  `tools/falsify/specs/frozen-cli-surface.json`, sept mutations, chacune rejouée
+  contre le test qui doit mordre.
+
+- **La surface CLI passe en version 5, et 24 drapeaux que le binaire a toujours
+  acceptés y sont visibles pour la première fois** (#334). C'est l'observation
+  qui a bougé, pas le binaire : `--intercept` et `--expose-to-network` sur
+  `proxy`, `--shapes` et `--expose-to-network` sur `serve`, `--check` sur
+  `version`, les six drapeaux de `serve` que `start` accepte réellement, trois
+  sur `evidence` et dix sur `docs`. Trois entrées sont parties, et les trois
+  appartenaient au parseur : `--version` et `-v` sous `version`, qui sont des
+  alias du verbe et non ses drapeaux (un lecteur qui tapait `feint version
+  --version` s'entendait répondre `flag provided but not defined`), et
+  `--state` sous `snapshot`, qui venait d'une phrase parlant de `serve`.
+  `snapshot` est désormais indexé par jeu de drapeaux (`snapshot save`,
+  `snapshot load`, `snapshot list`), ce qui est la façon de dire que `--force`
+  appartient à `save` seul.
+
+  `feint --help` a gagné tous les drapeaux qu'il cachait, dont les deux
+  `--expose-to-network`, ceux qu'un lecteur a le plus besoin de rencontrer avant
+  de les poser.
+
+- **`docs/proxy.md` a cessé de refuser un outil que ce dépôt livre** (#334). La
+  page annonçait au lecteur que l'interception « est #76 et délibérément pas cet
+  outil », pendant que `docs/limits.md` envoyait ce même lecteur s'en servir.
+  `feint proxy --intercept` existe depuis la v0.9.0 ; la page le documente
+  désormais : ce qu'il forge, ce qu'il imprime, et la seule chose qu'il ne fera
+  pas, à savoir installer quoi que ce soit dans le magasin de confiance du
+  système ou modifier le `/etc/hosts` de l'opérateur. #76 et #92 sont closes,
+  livrées.
+
 - **Une stack appliquée à chaque pull request épingle le provider qui a
   répondu, et une stack que la CI n'applique pas dit pourquoi** (la table de
   #325, premier jour). La page générée des clients a révélé deux choses que
