@@ -69,13 +69,46 @@ const (
 // shape before: the network conformance suite returned SKIP in CI from the day
 // it was written, and five more controls in tools/ui/check-page.py were found
 // measuring nothing in August 2026. **A corpus that replays nothing is red.**
+//
+// # The second direction, and why it is the same command
+//
+//	feint corpus --against-cloud --file scaleway/terraform.jsonl \
+//	  --endpoint https://api.scaleway.com \
+//	  --credential X-Auth-Token=SCW_SECRET_KEY \
+//	  --bind project_id=<project> --bind organization_id=<organisation>
+//
+// reissues one committed corpus at the provider it was recorded from, and a
+// divergence there means *the cloud has changed* (#359). One verb rather than
+// two, because it is one artefact, one comparator and one vocabulary — only the
+// endpoint and the conclusion differ. What the second direction adds is
+// everything a real account demands and an emulator does not, and all of it
+// lives in corpus_cloud.go: a guard that refuses to touch what this run did not
+// create, a closed list of what may be created because it is free, a ledger
+// destroyed at exit with the destruction proved by a read, and three outcomes
+// that are never blurred into one another.
+//
+// It is deliberately **not** a gate: credentials, real objects, real money, a
+// verdict that depends on whose account ran it. It runs on a schedule and on
+// demand, like the Monday drift pull request.
 func corpusCommand(args []string, stdout, stderr io.Writer) int {
 	flags := newFlagSet("corpus")
 	check := flags.Bool("check", false, "replay every committed corpus and fail on a divergence the acceptance list does not carry")
 	dir := flags.String("dir", defaultCorpusDir, "directory of committed corpora, one subdirectory per provider")
 	accepted := flags.String("accepted", defaultCorpusAccepted, "the divergences this repository records rather than fixes, each with its reason")
+	againstCloud := flags.Bool("against-cloud", false, "reissue one committed corpus at the cloud it was recorded from, and report what that cloud answers differently now")
+	file := flags.String("file", "", "the one corpus to reissue, relative to --dir (required with --against-cloud)")
+	endpoint := flags.String("endpoint", "", "the cloud to reissue at, e.g. https://api.scaleway.com (required with --against-cloud)")
+	format := flags.String("format", "text", "output format for --against-cloud: text or json")
+	timeout := flags.Duration("timeout", 60*time.Second, "how long one reissued request may take")
+	dryRun := flags.Bool("dry-run", false, "with --against-cloud, send the reads and refuse everything that would change the account")
+	markStale := flags.Bool("mark-stale", false, "with --against-cloud, write back into the acceptance file that the cloud has moved under this corpus")
+	var credentials, bind repeatable
+	flags.Var(&credentials, "credential", "put a redacted header back, as Header=ENV_VAR; the value never travels in argv (repeatable)")
+	flags.Var(&bind, "bind", "send this value wherever the recording carries an identifier at that field, as field=value (repeatable)")
 	flags.Usage = func() {
 		fmt.Fprint(stderr, "usage: feint corpus --check [--dir corpus] [--accepted corpus/accepted.json]\n")
+		fmt.Fprint(stderr, "       feint corpus --against-cloud --file <corpus> --endpoint <url> [--credential H=ENV] [--bind field=value]\n")
+		fmt.Fprint(stderr, "                    [--dir corpus] [--accepted corpus/accepted.json] [--format text|json] [--timeout 60s] [--dry-run] [--mark-stale]\n")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -85,11 +118,36 @@ func corpusCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "feint: unexpected argument %q; corpus takes flags only\n", flags.Arg(0))
 		return exitError
 	}
-	if !*check {
-		fmt.Fprintln(stderr, "feint: corpus has one mode today: --check (see --help)")
+	// Refused rather than silently ordered, because the two directions reach
+	// two different endpoints: one of them creates objects in somebody's
+	// account, and "which one ran" is not a question a reader of the output
+	// should have to answer from the ordering of a switch.
+	if *check && *againstCloud {
+		fmt.Fprintln(stderr, "feint: --check and --against-cloud are the two directions of one comparison; run them one at a time")
 		return exitError
 	}
-	return checkCorpus(*dir, *accepted, time.Now(), stdout, stderr)
+	switch {
+	case *check:
+		return checkCorpus(*dir, *accepted, time.Now(), stdout, stderr)
+	case *againstCloud:
+		creds, err := parseKeyValues("credential", credentials)
+		if err != nil {
+			fmt.Fprintf(stderr, "feint: %v\n", err)
+			return exitError
+		}
+		seeds, err := parseKeyValues("bind", bind)
+		if err != nil {
+			fmt.Fprintf(stderr, "feint: %v\n", err)
+			return exitError
+		}
+		return replayCorpusAtCloud(cloudReplayRequest{
+			dir: *dir, accepted: *accepted, file: *file, endpoint: *endpoint,
+			credentials: creds, bind: seeds, format: *format, timeout: *timeout,
+			dryRun: *dryRun, markStale: *markStale,
+		}, time.Now(), stdout, stderr)
+	}
+	fmt.Fprintln(stderr, "feint: corpus has two modes: --check against a fresh emulator, --against-cloud against the provider (see --help)")
+	return exitError
 }
 
 // corpusAcceptance is the committed judgement on a corpus: when each file was
@@ -124,6 +182,23 @@ type corpusRecording struct {
 	// measurement, and the entry is where that is legible.
 	Client string `json:"client"`
 	Cloud  string `json:"cloud"`
+	// CloudMovedAt and CloudMoved are what `corpus --against-cloud --mark-stale`
+	// writes back, and they are how the two directions of one comparison talk to
+	// each other (#359).
+	//
+	// #353 asked how a corpus ages and could only answer with a chosen horizon —
+	// 180 days, "about two releases" — because this gate holds one side of the
+	// comparison and cannot tell a cloud that moved from an emulator that broke.
+	// The other direction can, so when it finds the provider answering
+	// differently it writes the day and the count here, and the warning below
+	// stops being a guess about age and becomes a measurement.
+	//
+	// Written only when something moved. A clean run writes nothing, which costs
+	// the ability to say "last verified on", and buys a scheduled job that opens
+	// a pull request when there is something to decide and stays silent when
+	// there is not.
+	CloudMovedAt string `json:"cloud_moved_at,omitempty"`
+	CloudMoved   int    `json:"cloud_moved,omitempty"`
 }
 
 // corpusException is one divergence this repository knows about and has decided
@@ -246,6 +321,28 @@ func checkCorpus(dir, acceptedPath string, now time.Time, stdout, stderr io.Writ
 	fmt.Fprintf(stdout, "%d divergent finding(s) knowingly accepted, each printed above with its reason\n", excused)
 	fmt.Fprintf(stdout, "%d declared value comparison(s) and %d declared order comparison(s) actually ran\n", values, orders)
 
+	// The two warnings are emitted here, before any early return, and that
+	// placement is the whole point of them.
+	//
+	// Both read `acc` alone: neither depends on a single comparison this run
+	// made, and neither moves an exit code — that is written into their own
+	// doc comments as their contract. So the only thing a later placement can
+	// do is *withhold* them, and it did: they sat below the unexercised-
+	// invariant guard (#343) and below the stale-exemption guard, so a run
+	// that went red for either reason printed no word of the corpus that a
+	// provider has been measured to have moved under. A repository whose gate
+	// is already red is the one that most needs to know its recordings are
+	// stale, because "re-record it" may be the very fix.
+	//
+	// This is the shape CLAUDE.md's "un commentaire n'est pas un contrôle" is
+	// about, one turn further in: the comment on warnMovedCorpora says "on
+	// every run", and there was no test that made it true.
+	// TestTheMovedWarningSurvivesARunThatIsRedForAnotherReason fails without
+	// this placement, and TestACorpusTheCloudHasMovedUnderWarnsAndDoesNotFail
+	// reaches its own subject only because of it.
+	warnAgedCorpora(acc, now, stdout)
+	warnMovedCorpora(acc, stdout)
+
 	// The subject of a declared comparison, asserted rather than hoped for.
 	//
 	// Presence and type are compared everywhere; a value and an order are
@@ -293,8 +390,6 @@ func checkCorpus(dir, acceptedPath string, now time.Time, stdout, stderr io.Writ
 	if stale > 0 {
 		return exitError
 	}
-
-	warnAgedCorpora(acc, now, stdout)
 
 	if divergent > 0 {
 		fmt.Fprintf(stderr, "feint: %d divergence(s) between this emulator and the recorded cloud, none of them accepted in %s\n", divergent, acceptedPath)
@@ -562,6 +657,26 @@ type unusableException struct{ key, why string }
 func warnAgedCorpora(acc corpusAcceptance, now time.Time, stdout io.Writer) {
 	for _, name := range agedCorpora(acc.Recorded, now, acc.WarnAfterDays) {
 		fmt.Fprintf(stdout, "warning: %s, and a cloud changes: re-record it (corpus/README.md, \"Recording another one\"), or wait for #359 to say whether it is the cloud that moved\n", name)
+	}
+}
+
+// warnMovedCorpora says which recordings the *cloud* has been measured to have
+// moved under, and changes no exit code either.
+//
+// The same argument as [warnAgedCorpora], one step less speculative: there, the
+// gate warns because a recording is old and a cloud might have moved; here it
+// warns because somebody pointed `corpus --against-cloud` at the provider and it
+// did. Still a warning, because the finding names a file to re-record rather
+// than a defect of this emulator, and a gate that fails on somebody else's
+// change is a gate that gets disabled.
+// TestACorpusTheCloudHasMovedUnderWarnsAndDoesNotFail fails without this.
+func warnMovedCorpora(acc corpusAcceptance, stdout io.Writer) {
+	for _, r := range acc.Recorded {
+		if r.CloudMovedAt == "" || r.CloudMoved == 0 {
+			continue
+		}
+		fmt.Fprintf(stdout, "warning: %s was reissued at %s on %s and %d answer(s) had moved: re-record it (corpus/README.md, \"Recording another one\"), because this file now describes a cloud that no longer answers that way\n",
+			r.File, r.Cloud, r.CloudMovedAt, r.CloudMoved)
 	}
 }
 
