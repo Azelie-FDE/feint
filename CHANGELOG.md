@@ -17,6 +17,59 @@ what this project is judged on: **a response shape a client can observe**, and
 
 ### Added
 
+- **A score says where we stand; a queue says what to do next** (#408). `feint
+  coverage --evidence <record> --gaps` lists, per cloud and per axis, the
+  operations at zero **and the work each zero names**. That last half is the
+  point: a zero does not mean one thing. An operation missing `shape` because no
+  client ever drove it is a conformance-suite job; the same zero on one a client
+  drives every run is a recording session against a real account; and an axis
+  whose record says the operation *violated* its own contract is a defect in the
+  pack. Three zeros, three different people — a queue that merges them hands one
+  list of 158 names to all three.
+
+  Four kinds, each derived from the record rather than from a name, a guess or a
+  hand-kept list: `violating`, `unrecorded`, `undriven`, and `unproven` for what
+  the record does not explain. The last one is named rather than folded into a
+  neighbour, because a bucket that absorbs the unexplained is how a queue starts
+  lying. The vocabulary travels inside `--format json`, so a consumer never has
+  to open the source to learn what a kind means.
+
+  Ordered by the work, then by name, and the order is declared rather than
+  scored: a defect first because it is the only one here, then the recording
+  that is one session from earned, then the suite that is upstream of most axes.
+  **No target percentage anywhere** — a queue exists to be worked, not reached.
+
+  Measured on the committed record the day it landed: Exoscale needs 111
+  conformance suites, Scaleway 151 recordings. Two different jobs, which the
+  score alone could never have said.
+
+  `tools/falsify/specs/evidence-gaps.json`, six mutations, all red. One stayed
+  green on the first run and named a weakness in the fixture rather than in the
+  code: no operation of it was unclaimed by any pack, so the guard that skips
+  such an operation could be removed with every assertion still passing.
+
+- **The evidence axes are readable per provider by a command** (#402):
+  `feint coverage --evidence coverage/evidence.json` prints, for each pack, the
+  operations it serves and the count and percentage on each of the seven axes;
+  `--axis <name>` lists the operations at zero on one of them, which is what
+  turns a score into a work queue; `--format json` publishes the same numbers.
+  Offline, from the committed record, no SDK checkout and no socket.
+
+  It exists because the question was answered once by a throwaway script, and
+  **that script was wrong twice before it was right**: it first looked for a key
+  named `operation` inside each entry — the operation name is the map *key* — so
+  all 370 operations fell into one bucket and it printed `scaleway: 370 served,
+  93 % driven`. Right shape, right headers, plausible numbers, no relation to the
+  record. The provider of an operation is therefore never inferred from its name:
+  it is the pack that mounts a route declaring it, and a record naming an
+  operation no pack serves is refused rather than filed somewhere plausible.
+
+  The table is in [docs/routes.md](docs/routes.md), generated and held by
+  `feint docs --check`, with one line per axis saying what earns it — including
+  that an injected fault earns none of them, which is what the `negative` column
+  is worth. `cliSurfaceVersion` moves 12 to 13: two additions to one existing
+  verb, nothing removed, no exit code moved.
+
 - **The `negative` evidence axis, measured again: 35 of 370 to 173 of 370**
   (#390), and the number is what came out rather than a figure anybody aimed at.
   Per provider: Scaleway 18 to 97 of 173, Outscale 11 to 66 of 93, Exoscale 6 to
