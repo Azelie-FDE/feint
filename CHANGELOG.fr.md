@@ -109,6 +109,53 @@ change ni l'un ni l'autre a sa place dans `git log`.
   choisi de mémoire. Il avertit toujours sans jamais échouer, pour la raison
   qu'il l'a toujours fait : le fichier à changer est l'enregistrement, pas
   l'émulateur.
+- **Un corpus d'un vrai compte Outscale, machine comprise** (#354, #352, #353).
+  `corpus/outscale/oapi-cli-lifecycle.jsonl` porte 179 échanges enregistrés le
+  2026-08-21 contre le compte et la région que le propriétaire a nommés
+  lui-même, à travers `feint proxy --forward` : les lectures de catalogue que
+  toute pile fait d'abord, une paire de clés importée, un Net et son étiquette,
+  un Subnet modifié sur place, deux groupes de sécurité portant chacun une règle
+  (l'une sur `0.0.0.0/0`, l'autre nommant l'autre groupe), une table de routage
+  liée au subnet, un service internet et une route par défaut, **une machine**
+  créée avec `BootOnCreation=false` et jamais démarrée, une IP publique liée,
+  un volume de 1 Gio attaché puis instantané, une seconde NIC, un service NAT,
+  un load balancer interne, deux refus délibérés, et la destruction de tout
+  cela, chaque destruction prouvée par une lecture. Rien n'est resté : les
+  inventaires d'avant et d'après sont identiques, famille par famille.
+
+  C'est aussi la réponse à une question que `docs/proxy.md` laissait ouverte par
+  écrit, celle de ce qu'un identifiant **valide** obtient à travers le tunnel :
+  le code 4120 est le même pour une clé inconnue et pour une mauvaise région, et
+  ne pouvait donc pas trancher. Il obtient 200, avec de vraies données, en
+  lecture comme en écriture.
+
+- **Le pack Outscale déclare ce qu'un rejeu peut comparer** (#354). Cinq
+  `ReplayInvariant` : le type de VM que rend une création, la plage d'adresses
+  que rendent un Net et un Subnet, et **l'ordre des groupes de sécurité d'une
+  machine** sur `UpdateVm` et sur les lectures qui suivent. Le pack n'en
+  déclarait aucun, et la conséquence est exactement la forme de défaut que ce
+  dépôt traque : `feint corpus --check` imprimait « 0 divergent finding(s) »
+  au-dessus d'une exécution où aucune valeur ni aucun ordre d'une réponse
+  Outscale n'avait jamais été comparé. Ses compteurs sont passés de
+  `values_checked=2, orders_checked=6`, tous Scaleway, à **5 et 56**.
+
+  Le premier ordre comparé a trouvé un défaut (#379), et il tranche un point que
+  la garde évidente aurait pris à l'envers : **le cloud ne rend pas l'ordre que
+  le client a nommé**. La requête envoyait web puis db, le cloud a répondu db
+  puis web. Ce qu'un rejeu peut donc exiger, c'est l'ordre que le *cloud* a
+  rendu.
+
+- **Le pack Outscale se porte garant des listes fermées qu'il valide** (#354).
+  `PublicVocabulary` publie désormais chaque région et chaque sous-région du
+  catalogue, les deux sens d'une règle de groupe de sécurité, les deux natures
+  de load balancer et les quatre protocoles d'écouteur : exactement les valeurs
+  pour lesquelles une requête est refusée par leur nom. Sans cela, le
+  désinfecteur remplaçait `cloudgouv-eu-west-1a` par une chaîne synthétique,
+  `knownSubregion` la refusait (l'invariant #269 faisant son travail) et
+  `CreateSubnet` répondait 400 là où le cloud répondait 200, emportant avec lui
+  la machine, le volume, la NIC, l'IP publique, la liaison de table de routage,
+  le service NAT et le load balancer. Falsifié dans
+  `tools/falsify/specs/outscale-corpus.json`.
 
 - **`--forward` peut dire où atterrit vraiment un hôte terminé** (#357). Une
   entrée de `feint proxy --forward` peut désormais nommer sa cible — `--forward
@@ -979,6 +1026,121 @@ change ni l'un ni l'autre a sa place dans `git log`.
   rien ne le rende vrai :
   `TestTheMovedWarningSurvivesARunThatIsRedForAnotherReason` le rend vrai, sur
   l'exécution la plus pauvre qui atteigne l'impression.
+- **Cinq formes que le pack Outscale rendait autrement que le cloud**, trouvées
+  chacune en rejouant l'enregistrement d'un vrai compte, et retirant chacune son
+  exemption de `corpus/accepted.json` (#378, #379, #381, #382, #383). Le nombre
+  de divergences acceptées est passé de 289 à 141.
+
+  - **Une machine rend `UserData` et `Tags`** (#378). Le cloud écrit les deux
+    sur chaque machine (`""` et `[]` sur une machine créée sans ni l'un ni
+    l'autre) et ce pack ne les écrivait que lorsqu'il avait quelque chose à y
+    mettre. Toutes les autres familles du pack posaient déjà `"Tags": []` à la
+    création ; la Vm était la seule qui ne le faisait pas.
+  - **Deux listes reviennent dans l'ordre où l'API les rend** (#379). Les
+    groupes de sécurité d'une machine sont triés par `SecurityGroupId`
+    croissant, et les routes d'une table par destination **en lecture**, alors
+    que la création les rend dans l'ordre d'ajout. Les deux sont mesurés, et le
+    second est le cloud en désaccord avec lui-même : un client qui stocke la
+    réponse de la création puis relit voit les deux permuter, ce qu'un émulateur
+    qui « rangerait » masquerait. Terraform stocke les deux comme des listes,
+    donc un ordre propre à cet émulateur est une divergence de plan qui ne
+    converge jamais : #320, un fournisseur plus loin.
+  - **`DeleteRoute` et `DeleteLoadBalancer` rendent l'objet** (#381) plutôt que
+    la seule enveloppe, ce qui permet à un client de rafraîchir son état en un
+    appel au lieu de deux.
+  - **Une règle qui nomme un autre groupe de sécurité publie l'`AccountId` et le
+    nom de ce groupe** (#382). La forme `Rules[].SecurityGroupsMembers[]`
+    recopiait le membre du client tel quel, si bien que la réponse en disait
+    moins que celle du cloud sur un groupe nommé par son seul identifiant, et
+    c'est `AccountId` qui distingue un groupe du compte d'un groupe partagé par
+    un tiers.
+  - **Une image porte le mappage de son périphérique racine et ses permissions
+    de lancement** (#383) : le nom du périphérique, la taille et le type du
+    volume racine, que lit un client avant de dimensionner le volume qu'il crée.
+    Le `SnapshotId` et l'`Iops` de ce mappage sont **déclarés** plutôt que
+    servis, et la limite est celle que le code traçait déjà : nommer un
+    instantané auquel `ReadSnapshots` ne peut pas répondre, c'est ainsi que la
+    résolution d'un client échoue sur un objet inexistant, et un volume
+    `standard` n'a pas d'IOPS provisionnées.
+
+  **Un ordre n'est délibérément pas déclaré en `ReplayInvariant`, et c'est une
+  limite qui mérite d'être écrite.** L'ordre des groupes de sécurité d'une
+  machine dérive d'identifiants frappés par le *cloud* ; aucun émulateur ne
+  frappe les mêmes, et `feint replay` compare position par position après
+  reliaison. Le déclarer n'achèterait donc qu'une exemption permanente, et une
+  exemption permanente est une barrière qui a cessé sans bruit de couvrir ce
+  qu'elle nomme. Un test unitaire du pack le tient à la place. Ce qui est
+  déclaré, c'est l'ordre des routes, que le cloud dérive d'une valeur que les
+  deux côtés portent.
+
+- **L'enregistreur n'écrit plus deux valeurs différentes comme une seule**
+  (#384). Une expurgation remplaçait toute valeur reconnue par la même chaîne,
+  ce qui est juste pour un identifiant secret et faux pour tout le reste que
+  capture une règle portant sur les *noms*. Mesuré en enregistrant un vrai
+  compte Outscale : `KeypairName` contient `key`, donc le nom de la clé importée
+  et celui, inventé, d'un refus délibéré sont tous deux arrivés dans la
+  transcription en `REDACTED`, et le fichier affirmait que les deux appels
+  visaient le même objet. Au rejeu, l'émulateur supprimait la vraie clé sur
+  l'échange censé répondre 404 et n'avait plus rien pour celui censé répondre
+  200.
+
+  Un remplaçant porte désormais un suffixe par valeur : `REDACTED-<8 hex>`, un
+  HMAC sous une clé tirée une fois par processus et jamais écrite. Trois
+  propriétés, et la troisième explique pourquoi c'est un HMAC et non un
+  condensat : une même valeur garde le même remplaçant dans tout
+  l'enregistrement, deux valeurs en obtiennent deux, et **la valeur reste
+  irrécupérable depuis le remplaçant quelle que soit son entropie**, là où un
+  condensat simple d'un secret court se retrouve en essayant des candidats.
+  `internal/corpus` les renumérote en `REDACTED-<n>` pour que l'artefact
+  commité porte le compteur du sanitiseur et que l'alphabet n'ait qu'une seule
+  graphie à admettre.
+
+  Rien n'a bougé sur *quels* noms sont expurgés : `carriers` est intact, la
+  liste blanche des en-têtes est intacte, et la seule valeur rachetée par son
+  propre format (une ligne de clé publique OpenSSH) l'est toujours.
+  `internal/corpus` refusait déjà exactement cette forme une étape plus loin
+  (« la transcription dirait alors que deux objets du compte n'en font qu'un »)
+  et ne pouvait pas la voir, la fusion ayant lieu dans l'enregistreur avant que
+  le sanitiseur ne rencontre deux valeurs. Six mutations falsifiées dans
+  `tools/falsify/specs/distinct-placeholders.json`.
+
+- **Un subnet ne tombe plus hors du net qui le contient** (#354). Le sanitiseur
+  frappait chaque CIDR depuis un compteur unique : un Net enregistré en
+  `10.111.0.0/16` et son Subnet en `10.111.1.0/24` ressortaient en deux blocs
+  disjoints, et l'émulateur répondait `400 IpRange … is outside the Net range …`
+  là où le cloud répondait 200, emportant avec lui la machine, le volume, la
+  NIC, l'IP publique, la liaison de table de routage, le service NAT et le load
+  balancer situés derrière ce subnet : une centaine de constats, dont aucun
+  n'était un défaut de l'émulateur. `mint.planBlocks` décide désormais tous les
+  blocs d'un enregistrement en une passe, du préfixe le plus court au plus long,
+  et place un enfant au décalage qu'il occupait dans son parent.
+
+  **C'est le troisième défaut d'une même famille, et la famille est la leçon.**
+  Un masque qui cessait d'être un masque, une plage d'adresses qui courait à
+  l'envers, et maintenant un subnet hors de son net : chacun était une *relation
+  entre* valeurs plutôt qu'une propriété de l'une d'elles, c'est-à-dire
+  précisément ce qu'un parcours valeur par valeur ne peut pas voir. D'où une
+  passe préalable à côté de `learnAddressOrder`, et non un quatrième cas
+  particulier. `TestASubnetStaysInsideItsNet`.
+
+- **Un corpus est rejoué contre un émulateur servant la région d'où il a été
+  enregistré** (#354). `corpus/accepted.json` porte désormais une `region` (et
+  une `zone`) par enregistrement, et `feint corpus --check` construit les packs
+  de chaque fichier à partir d'elle. Chez Outscale et Exoscale, une région n'est
+  pas une propriété de la surface d'API mais de l'endpoint vers lequel le client
+  pointe, et un pack refuse une création nommant une zone que son déploiement ne
+  publie pas : l'invariant #269. Un enregistrement `cloudgouv-eu-west-1` rejoué
+  contre un émulateur `eu-west-2` était donc refusé dès son propre
+  `CreateSubnet`, et sur tout ce qui en dépendait.
+
+  Lue depuis le manifeste versionné et jamais depuis l'environnement, ce qui
+  fait du verdict de cette barrière une propriété de fichiers commités plutôt
+  que du runner : l'affirmation que porte
+  `TestTheGatesVerdictDoesNotDependOnTheEnvironment` devient vraie par
+  construction au lieu de l'être par coïncidence.
+  `TestACorpusIsReplayedInTheRegionItNames` tient les deux moitiés : région
+  nommée, l'enregistrement rejoue propre ; région absente, le même
+  enregistrement est refusé.
 
 - **Quatre défauts du sanitiseur, tous trouvés en enregistrant un deuxième
   fournisseur, et tous du genre qui fabrique une divergence** (#354). À eux

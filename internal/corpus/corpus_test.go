@@ -652,3 +652,128 @@ func TestASpaceWithNoRoomLeftIsRefusedRatherThanOverrun(t *testing.T) {
 		t.Errorf("the refusal does not say a replacement was handed out twice: %v", err)
 	}
 }
+
+// A block nested inside another block stays nested.
+//
+// The third defect of this family, and the one that showed the family is a
+// family: a netmask that stopped being a netmask, an address range that ran
+// backwards, and a subnet outside its net. Each was a relation *between* values
+// that the per-value walk could not see, which is why [mint.planBlocks] is a
+// pre-pass rather than a fourth special case.
+//
+// Measured on 2026-08-21 replaying a real Outscale account: the Net was
+// 10.111.0.0/16 and its Subnet 10.111.1.0/24, they came out as two disjoint
+// blocks, and the emulator answered `400 IpRange … is outside the Net range …`
+// where the cloud answered 200. Everything downstream of that subnet — the
+// machine, its volume, its NIC, its public IP, the route table link, the NAT
+// service and the load balancer — then answered 400 or 404 for that one reason,
+// about a hundred findings and not one of them a defect of the emulator.
+func TestASubnetStaysInsideItsNet(t *testing.T) {
+	exs := []trace.Exchange{{
+		Method: "POST", Path: "/thing/v1/zones/fr-par-1/things", Status: 200,
+		// Deliberately in an order that meets a child before its parent, and
+		// with a second net so the two families cannot be told apart by luck.
+		Req: &trace.Message{Body: map[string]any{"subnet": "10.111.1.0/24"}},
+		Res: &trace.Message{Body: map[string]any{
+			"net":       "10.111.0.0/16",
+			"subnet":    "10.111.1.0/24",
+			"deeper":    "10.111.1.128/25",
+			"elsewhere": "10.222.0.0/16",
+			"outside":   "10.222.5.0/24",
+		}},
+	}}
+	out, _ := sanitise(t, exs)
+	res, _ := out[0].Res.Body.(map[string]any)
+	req, _ := out[0].Req.Body.(map[string]any)
+
+	prefix := func(name string) netip.Prefix {
+		t.Helper()
+		p, err := netip.ParsePrefix(res[name].(string))
+		if err != nil {
+			t.Fatalf("%s became %q, which is not a prefix", name, res[name])
+		}
+		return p
+	}
+	net, subnet, deeper := prefix("net"), prefix("subnet"), prefix("deeper")
+	elsewhere, outside := prefix("elsewhere"), prefix("outside")
+
+	if !net.Contains(subnet.Addr()) {
+		t.Errorf("the subnet %v is outside its net %v: the create that carries it is refused 400 and everything it would have made 404s", subnet, net)
+	}
+	if !subnet.Contains(deeper.Addr()) {
+		t.Errorf("the nested block %v is outside %v", deeper, subnet)
+	}
+	if !elsewhere.Contains(outside.Addr()) {
+		t.Errorf("the second net's subnet %v is outside %v", outside, elsewhere)
+	}
+	// A block of one net must not land inside another: nesting the recording
+	// does not carry would be a relation the sanitiser invented.
+	if elsewhere.Contains(subnet.Addr()) || net.Contains(outside.Addr()) {
+		t.Errorf("two unrelated nets now overlap: %v and %v", net, elsewhere)
+	}
+	// The prefix lengths are still the recording's, and the request agrees with
+	// the response.
+	if net.Bits() != 16 || subnet.Bits() != 24 || deeper.Bits() != 25 {
+		t.Errorf("a prefix length moved: net %v, subnet %v, deeper %v", net, subnet, deeper)
+	}
+	if req["subnet"] != res["subnet"] {
+		t.Errorf("one block got two replacements, %v in the request and %v in the response", req["subnet"], res["subnet"])
+	}
+	if raw, _ := json.Marshal(out); bytes.Contains(raw, []byte("10.111.")) {
+		t.Error("an address range of the account was written down verbatim")
+	}
+}
+
+// The recorder's placeholder is renumbered rather than kept.
+//
+// It carries a keyed digest of the value it replaced, so that two originals are
+// two placeholders (#384). Nothing is recoverable from it, and it is still not
+// what a committed artefact should carry: a reader of the corpus should see
+// this package's own counter, and the alphabet should have one spelling to
+// admit rather than two.
+//
+// The second half is the tooth: [Audit] must refuse a recorder's digest that
+// survived into the artefact, which it cannot do if [alphabet.mayKeep] admits
+// the whole family.
+func TestARecordersPlaceholderIsRenumberedRatherThanKept(t *testing.T) {
+	const first, second = "REDACTED-a625a944", "REDACTED-19fe8cbe"
+	exs := []trace.Exchange{{
+		Method: "POST", Path: "/thing/v1/zones/fr-par-1/things", Status: 200,
+		Req: &trace.Message{Body: map[string]any{"key_a": first, "key_b": second}},
+		Res: &trace.Message{Body: map[string]any{"key_a": first}},
+	}}
+	out, _ := sanitise(t, exs)
+	req, _ := out[0].Req.Body.(map[string]any)
+	res, _ := out[0].Res.Body.(map[string]any)
+
+	for name, got := range map[string]any{"key_a": req["key_a"], "key_b": req["key_b"]} {
+		s, _ := got.(string)
+		if !isMintedPlaceholder(s) {
+			t.Errorf("%s came back %q, which is not the spelling this package hands out", name, s)
+		}
+		if s == first || s == second {
+			t.Errorf("%s kept the recorder's digest %q, so a value of the recording survived", name, s)
+		}
+	}
+	// The distinction the recorder made has to survive the renumbering, or this
+	// package undoes #384 one stage later.
+	if req["key_a"] == req["key_b"] {
+		t.Errorf("two placeholders became one (%v): the artefact now says two values were the same",
+			req["key_a"])
+	}
+	// And the substitution is consistent, so a request and the answer to it
+	// still name the same thing.
+	if req["key_a"] != res["key_a"] {
+		t.Errorf("one placeholder got two replacements, %v and %v", req["key_a"], res["key_a"])
+	}
+
+	// THE TOOTH: a recorder's digest that survived is a leak, and the audit says
+	// so. Without the narrowing in isMintedPlaceholder this passes silently.
+	surviving := []trace.Exchange{{
+		Method: "POST", Path: "/thing/v1/zones/fr-par-1/things", Status: 200,
+		Res: &trace.Message{Body: map[string]any{"key_a": first}},
+	}}
+	if leaks := Audit(exs, surviving, options(t)); len(leaks) == 0 {
+		t.Error("the audit accepted a recorder's placeholder that survived from the recording")
+	}
+}

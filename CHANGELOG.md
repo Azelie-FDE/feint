@@ -100,6 +100,50 @@ what this project is judged on: **a response shape a client can observe**, and
   date somebody measured instead of the 180-day horizon somebody picked. It still
   warns and never fails, for the reason it always did: the file to change is the
   recording, not the emulator.
+- **A corpus of a real Outscale account, machine included** (#354, #352, #353).
+  `corpus/outscale/oapi-cli-lifecycle.jsonl` is 179 exchanges recorded on
+  2026-08-21 against the account and region the owner named by hand, through
+  `feint proxy --forward`: the catalogue reads a stack makes first, an imported
+  keypair, a Net with a tag, a Subnet updated in place, two security groups with
+  a rule each (one on `0.0.0.0/0`, one naming the other group), a route table
+  linked to the subnet, an internet service and a default route, **a machine**
+  created `BootOnCreation=false` and never booted, a public IP linked to it, a
+  1 GiB volume attached and snapshotted, a second NIC, a NAT service, an
+  internal load balancer, two deliberate refusals, and the teardown of all of it
+  with every destruction proved by a read. Nothing was left behind: the
+  inventory before and after is identical family by family.
+
+  It is also the answer to a question `docs/proxy.md` had left open in writing —
+  what a **valid** credential answers through the tunnel — because 4120 is the
+  same code for an unknown key and for a wrong region and could not settle it.
+  It answers 200, with real data, on reads and on writes.
+
+- **The Outscale pack declares what a replay may compare** (#354). Five
+  `ReplayInvariant`s: the VM type a create answers, the address range a Net and
+  a Subnet answer, and **the order of a machine's security groups** on
+  `UpdateVm` and on the reads that follow. The pack declared none before, and
+  the consequence was the failure shape this repository files issues about —
+  `feint corpus --check` printed "0 divergent finding(s)" over a run in which no
+  value and no order of an Outscale answer had ever been compared. Its counters
+  went from `values_checked=2, orders_checked=6`, all of them Scaleway's, to
+  **5 and 56**.
+
+  The first order it compared found a defect (#379), and it settles something
+  that the obvious guard would have got backwards: **the cloud does not answer
+  the order the client named.** The request sent web-then-db and the cloud
+  answered db-then-web, so what a replay can hold the emulator to is the order
+  the *cloud* answered.
+
+- **The Outscale pack vouches for the closed lists it validates against**
+  (#354). `PublicVocabulary` now publishes every region and subregion of the
+  catalogue, the two flows of a security-group rule, the two kinds of load
+  balancer and the four listener protocols — exactly the values a request is
+  refused by name for. Without it the sanitiser replaced `cloudgouv-eu-west-1a`
+  with a synthetic string, `knownSubregion` refused it (the #269 invariant doing
+  its job) and `CreateSubnet` answered 400 where the cloud answered 200, taking
+  the machine, the volume, the NIC, the public IP, the route table link, the NAT
+  service and the load balancer with it. Falsified in
+  `tools/falsify/specs/outscale-corpus.json`.
 
 - **`--forward` can say where a terminated host actually goes** (#357). An entry
   of `feint proxy --forward` may now name its target — `--forward
@@ -915,6 +959,111 @@ what this project is judged on: **a response shape a client can observe**, and
   and nothing made it true —
   `TestTheMovedWarningSurvivesARunThatIsRedForAnotherReason` does, on the
   poorest run that reaches the print.
+- **Five shapes the Outscale pack answered differently from the cloud**, each
+  found by replaying the recording of a real account and each retiring its
+  exemption from `corpus/accepted.json` (#378, #379, #381, #382, #383). The
+  accepted count went from 289 to 141.
+
+  - **A machine answers `UserData` and `Tags`** (#378). The cloud writes both on
+    every machine — `""` and `[]` on one created with neither — and this pack
+    wrote them only when it had something to put in them. Every other kind in
+    the pack already set `"Tags": []` at create time; the Vm was the one that
+    did not.
+  - **Two lists come back in the order the API orders them** (#379). A
+    machine's security groups are ordered by `SecurityGroupId` ascending, and a
+    route table's routes by destination **on a read** while the create echoes
+    them in append order. Both are measured, and the second is the cloud
+    disagreeing with itself: a client that stores the create's answer and then
+    reads sees the two swap, which an emulator that tidied it up would hide.
+    Terraform stores both as lists, so an order of this emulator's own is a plan
+    diff that never converges — #320, one provider out.
+  - **`DeleteRoute` and `DeleteLoadBalancer` answer the object** (#381) rather
+    than the envelope alone, which is how a client refreshes its state in one
+    call instead of two.
+  - **A rule that names another security group publishes that group's
+    `AccountId` and name** (#382). The `Rules[].SecurityGroupsMembers[]` form
+    copied the client's member through verbatim, so the answer said less than
+    the cloud's about a group the client named by identifier alone — and
+    `AccountId` is what distinguishes a member group of this account from one
+    another account shared in.
+  - **An image carries its root device mapping and its launch permissions**
+    (#383): the device name, the root volume's size and type, which a client
+    reads before it sizes the volume it creates. The `SnapshotId` and the `Iops`
+    of that mapping are **declared** rather than served, and the line is the one
+    the code already drew: naming a snapshot `ReadSnapshots` cannot answer for
+    is how a client's resolve fails on an object that does not exist, and a
+    standard volume has no provisioned IOPS.
+
+  **One order is deliberately not declared as a `ReplayInvariant`, and that is
+  a limit worth writing down.** A machine's security-group order is derived from
+  identifiers the *cloud* minted; no emulator mints those, and `feint replay`
+  compares position by position after rebinding — so declaring it would buy a
+  permanent exemption, and a permanent exemption is a gate that has quietly
+  stopped covering what it names. It is held by a unit test of the pack instead.
+  What is declared is the route order, which the cloud derives from a value both
+  sides carry.
+
+- **The recorder no longer writes two different values as one** (#384). A
+  redaction replaced every value the rules matched with the same string, which
+  is right for a credential and wrong for everything else a *name*-pattern rule
+  catches. Measured recording a real Outscale account: `KeypairName` matches
+  `key`, so the imported key's name and the invented one of a deliberate refusal
+  both reached the transcript as `REDACTED`, and the file said the two calls
+  addressed the same object. Replayed, the emulator deleted the real key on the
+  exchange meant to answer 404 and had nothing left for the one meant to answer
+  200.
+
+  A placeholder now carries a per-value suffix — `REDACTED-<8 hex>`, an HMAC
+  under a key drawn once per process and never written down. Three properties,
+  and the third is why it is keyed rather than hashed: the same original keeps
+  the same placeholder throughout a recording, two originals get two, and **the
+  value cannot be recovered from the placeholder whatever its entropy** — a
+  plain digest of a short secret is a brute force away from being the secret.
+  `internal/corpus` renumbers them to `REDACTED-<n>` so the committed artefact
+  carries the sanitiser's own counter and the alphabet has one spelling to
+  admit.
+
+  Nothing about *which* names are redacted moved: `carriers` is untouched, the
+  header allowlist is untouched, and the one value bought back by its own format
+  (an OpenSSH public key line) still is. `internal/corpus` already refused this
+  exact shape one stage later — "the transcript would then say that two objects
+  of the account were one" — and could not see it, because the merge happened in
+  the recorder before the sanitiser met two values. Six falsified mutations in
+  `tools/falsify/specs/distinct-placeholders.json`.
+
+- **A subnet no longer lands outside the net that contains it** (#354). The
+  sanitiser minted each CIDR from one counter, so a recorded Net of
+  `10.111.0.0/16` and its Subnet of `10.111.1.0/24` came out two disjoint
+  blocks and the emulator answered `400 IpRange … is outside the Net range …`
+  where the cloud answered 200 — taking the machine, the volume, the NIC, the
+  public IP, the route table link, the NAT service and the load balancer behind
+  that subnet with it, about a hundred findings and not one of them the
+  emulator's. `mint.planBlocks` now decides every block of a recording in one
+  pass, shortest prefix first, and places a child at the offset it held inside
+  its parent.
+
+  **It is the third defect of one family, and the family is the lesson.** A
+  netmask that stopped being a netmask, an address range that ran backwards, and
+  now a subnet outside its net: each was a *relation between* values rather than
+  a property of one, which is exactly what a per-value walk cannot see. That is
+  why this is a pre-pass beside `learnAddressOrder` rather than a fourth special
+  case. `TestASubnetStaysInsideItsNet`.
+
+- **A corpus is replayed against an emulator serving the region it was recorded
+  from** (#354). `corpus/accepted.json` gained a `region` (and `zone`) per
+  recording, and `feint corpus --check` builds the packs for each file from it.
+  At Outscale and Exoscale a region is not a property of the API surface, it is
+  which endpoint the client was pointed at, and a pack refuses a create naming a
+  zone its deployment does not publish — the #269 invariant. So a
+  `cloudgouv-eu-west-1` recording replayed against an `eu-west-2` emulator was
+  refused on its own `CreateSubnet` and on everything downstream of it.
+
+  Read from the versioned manifest and never from the environment, which is what
+  makes this gate's verdict a property of committed files rather than of the
+  runner — the claim `TestTheGatesVerdictDoesNotDependOnTheEnvironment` asserts,
+  now true by construction instead of true by coincidence.
+  `TestACorpusIsReplayedInTheRegionItNames` holds both halves: named, the
+  recording replays clean; unnamed, the same recording is refused.
 
 - **Four defects of the sanitiser, all found by recording a second provider, and
   all of them the kind that manufactures a divergence** (#354). Between them

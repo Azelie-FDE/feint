@@ -44,6 +44,25 @@ import (
 
 const kindLoadBalancer = "loadbalancer"
 
+// lbInternetFacing and lbInternal are the two kinds of load balancer, and the
+// only two values a create accepts. Named rather than written inline because
+// PublicVocabulary has to vouch for exactly the values this refuses, and a
+// second copy of a closed list is a copy that drifts silently: the symptom is a
+// corpus that replays 400 on every CreateLoadBalancer and reads like an
+// emulator defect. Measured on the recording of 2026-08-21, where "internal"
+// became "redacted-1208".
+const (
+	lbInternetFacing = "internet-facing"
+	lbInternal       = "internal"
+)
+
+// stateDeleting is what the real API reports on the object a delete has just
+// accepted, measured on a real account on 2026-08-21: DeleteLoadBalancer
+// answers the balancer with State "deleting" (#381). This pack removes it from
+// the store at once — #380 carries the whole of that difference — so the state
+// is what the answer says rather than what the store holds a moment later.
+const stateDeleting = "deleting"
+
 // lbuPublicIPBase is the fictional block the emulator hands to internet-facing
 // load balancers. It is TEST-NET-3, distinct from publicIPBase (TEST-NET-2) on
 // purpose: the real service associates "a public IP owned by 3DS OUTSCALE"
@@ -140,8 +159,8 @@ func (p *Pack) createLoadBalancer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lbType := orDefault(req.LoadBalancerType, "internet-facing")
-	if lbType != "internet-facing" && lbType != "internal" {
+	lbType := orDefault(req.LoadBalancerType, lbInternetFacing)
+	if lbType != lbInternetFacing && lbType != lbInternal {
 		p.badRequest(w, "LoadBalancerType must be internet-facing or internal")
 		return
 	}
@@ -222,7 +241,7 @@ func (p *Pack) createLoadBalancer(w http.ResponseWriter, r *http.Request) {
 	// deterministic.
 	digits := dnsDigits(p.env.NewID())
 	prefix := ""
-	if lbType == "internal" {
+	if lbType == lbInternal {
 		prefix = "internal-"
 	}
 	attrs["DnsName"] = fmt.Sprintf("%s%s-%s.%s.lbu.outscale.com", prefix, req.LoadBalancerName, digits, p.region)
@@ -248,7 +267,7 @@ func (p *Pack) createLoadBalancer(w http.ResponseWriter, r *http.Request) {
 	// "The primary private IP of the load balancer" (client.gen.go:6294), from
 	// the subnet's own pool; subnetAllocator reserves it back.
 	attrs["PrivateIp"] = pl.Address.String()
-	if lbType == "internet-facing" {
+	if lbType == lbInternetFacing {
 		address, ok := p.mintLBUAddress()
 		if !ok {
 			unlock()
@@ -627,10 +646,20 @@ func (p *Pack) deleteLoadBalancer(w http.ResponseWriter, r *http.Request) {
 	// nothing. A balancer left behind holds an address of a network the next
 	// create would reuse.
 	p.removeBalancer(r.Context(), res)
+	// The answer is rendered BEFORE the store forgets the balancer, because the
+	// real API answers the object it is destroying (#381): DeleteLoadBalancer
+	// carries a LoadBalancer, measured on a real account on 2026-08-21, and
+	// this pack answered the envelope alone. Rendered from the resource as it
+	// stood, with the state the cloud reports at that moment.
+	view := p.loadBalancerView(res)
+	view["State"] = stateDeleting
 	p.env.Store.Delete(Name, kindLoadBalancer, req.LoadBalancerName)
 	// The provider polls ReadLoadBalancers until the name is gone; deleting
 	// immediately means the first poll already answers "none".
-	emulator.WriteJSON(w, http.StatusOK, map[string]any{"ResponseContext": p.context()})
+	emulator.WriteJSON(w, http.StatusOK, map[string]any{
+		"LoadBalancer":    view,
+		"ResponseContext": p.context(),
+	})
 }
 
 // loadBalancerView is the LoadBalancer the SDK describes (client.gen.go:6254).

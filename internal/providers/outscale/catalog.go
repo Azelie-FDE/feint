@@ -158,10 +158,47 @@ const linuxProductCode = "0001"
 func imageStructure(name string) map[string]any {
 	return map[string]any{
 		// The three of #86, without which the provider dereferences nil.
+		// BlockDeviceMappings stays empty, and #383 asked for the opposite.
+		//
+		// The mapping was filled in this branch — device name, root volume size
+		// and type — and it made two gates contradict each other, which is how
+		// the line below was found rather than argued:
+		//
+		//   - `shapes --check` descends into a non-empty list and reports
+		//     Bsu.SnapshotId and Bsu.Iops missing, because the real cloud carries
+		//     them on every image (shapes/outscale.json);
+		//   - declining those two then makes tools/conformance/score.sh fail four
+		//     legs at once with "field declines whose field the emulator now
+		//     serves", because CreateImage answers both — truthfully, for an image
+		//     really cut from a snapshot this store holds;
+		//   - and omitting them from CreateImage instead fails
+		//     tools/conformance/outscale/terraform.sh, which asserts that a
+		//     registered image names the snapshot it was cut from.
+		//
+		// All three are right. A field decline is written against an *operation*,
+		// and this operation answers two kinds of object; there is no state of
+		// this file where a filled mapping, the declines and the real client all
+		// agree. An empty list is the one shape that says "this emulator models no
+		// disk behind its catalogue" without inventing a SnapshotId — the exact
+		// fiction that killed a conformance run once, when a fictional root
+		// VolumeId on a machine was resolved by the Terraform provider (rule 4).
+		//
+		// #383 is therefore reopened rather than closed here, and #389 carries
+		// what makes it deliverable: back the catalogue with a snapshot the pack
+		// really holds, so both keys can be answered truthfully everywhere and
+		// both declines can go.
+		//
+		// TestTheCatalogueMappingStaysEmptyUntilASnapshotBacksIt fails without
+		// this.
 		"BlockDeviceMappings": []any{},
 		"StateComment":        map[string]any{},
+		// The owner, which for this catalogue is this emulator's own account —
+		// the same accountID every other answer carries. An empty list said the
+		// image was launchable by nobody, where the real cloud names whoever it
+		// is shared with; naming the owner is both true here and the shape a
+		// client iterates.
 		"PermissionsToLaunch": map[string]any{
-			"AccountIds":       []any{},
+			"AccountIds":       []any{accountID},
 			"GlobalPermission": false,
 		},
 		// The nine of #95: present on every image the real cloud returns, and
