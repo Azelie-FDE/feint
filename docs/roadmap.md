@@ -30,9 +30,9 @@ numbers. Both are short.
 
 **2 — Answer the question that can cancel most of the remaining work.**
 
-- **#407** — `shape` is the weakest axis at 14 %, and **292 of its 318 zeros are
-  `unrecorded`**: operations a real client already drives, whose real answer was
-  never kept. This repository already holds **619 recorded exchanges** in
+- **#407** — `shape` is the weakest axis by a wide margin, and **292 of its 318
+  zeros are `unrecorded`**: operations a real client already drives, whose real
+  answer was never kept. This repository already holds **619 recorded exchanges** in
   `corpus/`, and they do not feed `shapes/`. Whether they can is answerable
   **offline, without an account, in one sitting** — and if they can, most of the
   parity volume disappears without touching a cloud.
