@@ -41,10 +41,10 @@ a workflow. None of them opens a socket.
 
 | Cloud | Served | `driven` | `probed` | `contract` | `dataplane` | `shape` | `behaviour` | `negative` |
 |---|---|---|---|---|---|---|---|---|
-| Exoscale | 104 | 82 % (85) | 92 % (96) | 91 % (95) | 82 % (85) | 30 % (31) | 75 % (78) | 10 % (10) |
-| Outscale | 93 | 100 % (93) | 100 % (93) | 100 % (93) | 100 % (93) | 71 % (66) | 85 % (79) | 71 % (66) |
+| Exoscale | 104 | 83 % (86) | 92 % (96) | 91 % (95) | 83 % (86) | 30 % (31) | 75 % (78) | 10 % (10) |
+| Outscale | 93 | 100 % (93) | 100 % (93) | 100 % (93) | 100 % (93) | 71 % (66) | 86 % (80) | 71 % (66) |
 | Scaleway | 173 | 96 % (166) | 82 % (141) | 82 % (141) | 96 % (166) | 21 % (37) | 92 % (159) | 56 % (97) |
-| **All three** | 370 | 93 % (344) | 89 % (330) | 89 % (329) | 93 % (344) | 36 % (134) | 85 % (316) | 47 % (173) |
+| **All three** | 370 | 93 % (345) | 89 % (330) | 89 % (329) | 93 % (345) | 36 % (134) | 86 % (317) | 47 % (173) |
 
 What each axis says, one line each. They are independent and are never added
 into one number: none of them implies another, and an operation can be driven
@@ -623,7 +623,7 @@ are in `coverage/`, one artefact per provider.
 | `POST` | `/api/v1/RebootVms` | `osc/Client.RebootVms` | `client` `contract` `runtime` `probe` `behaviour` `negative` |
 | `POST` | `/api/v1/StartVms` | `osc/Client.StartVms` | `client` `contract` `runtime` `probe` `behaviour` `negative` |
 | `POST` | `/api/v1/StopVms` | `osc/Client.StopVms` | `client` `contract` `runtime` `probe` `negative` |
-| `POST` | `/api/v1/UpdateVm` | `osc/Client.UpdateVm` | `client` `contract` `shape` `runtime` `probe` `negative` |
+| `POST` | `/api/v1/UpdateVm` | `osc/Client.UpdateVm` | `client` `contract` `shape` `runtime` `probe` `behaviour` `negative` |
 
 ### `Volume`
 
@@ -730,7 +730,7 @@ are in `coverage/`, one artefact per provider.
 | `DELETE` | `/v2/load-balancer/{id}` | `exoscale/v2.delete-load-balancer` | `client` `contract` `runtime` `probe` `behaviour` |
 | `DELETE` | `/v2/private-network/{id}/{field}` | `exoscale/v2.reset-private-network-field` | `no-client` |
 | `DELETE` | `/v2/private-network/{id}` | `exoscale/v2.delete-private-network` | `client` `contract` `shape` `runtime` `probe` `behaviour` `negative` |
-| `DELETE` | `/v2/security-group/{id}/rules/{rule}` | `exoscale/v2.delete-rule-from-security-group` | `client` `contract` `shape` `runtime` `probe` `behaviour` |
+| `DELETE` | `/v2/security-group/{id}/rules/{rule}` | `exoscale/v2.delete-rule-from-security-group` | `client` `contract` `shape` `runtime` `probe-refusal` `behaviour` |
 | `DELETE` | `/v2/security-group/{id}` | `exoscale/v2.delete-security-group` | `client` `contract` `shape` `runtime` `probe` `behaviour` |
 | `DELETE` | `/v2/snapshot/{id}` | `exoscale/v2.delete-snapshot` | `client` `contract` `runtime` `probe` `behaviour` |
 | `DELETE` | `/v2/ssh-key/{name}` | `exoscale/v2.delete-ssh-key` | `client` `contract` `shape` `runtime` `probe` `behaviour` `negative` |
@@ -752,7 +752,7 @@ are in `coverage/`, one artefact per provider.
 | `GET` | `/v2/load-balancer` | `exoscale/v2.list-load-balancers` | `client` `contract` `shape` `runtime` `probe` `behaviour` |
 | `GET` | `/v2/private-network/{id}` | `exoscale/v2.get-private-network` | `client` `contract` `shape` `runtime` `probe` `behaviour` |
 | `GET` | `/v2/private-network` | `exoscale/v2.list-private-networks` | `client` `contract` `shape` `runtime` `probe` `behaviour` |
-| `GET` | `/v2/security-group/{id}` | `exoscale/v2.get-security-group` | `no-client` `contract` `shape` `probe` |
+| `GET` | `/v2/security-group/{id}` | `exoscale/v2.get-security-group` | `client` `contract` `shape` `runtime` `probe` |
 | `GET` | `/v2/security-group` | `exoscale/v2.list-security-groups` | `client` `contract` `shape` `runtime` `probe` `behaviour` |
 | `GET` | `/v2/snapshot/{id}` | `exoscale/v2.get-snapshot` | `no-client` `contract` `probe` |
 | `GET` | `/v2/snapshot` | `exoscale/v2.list-snapshots` | `client` `contract` `shape` `runtime` `probe` `behaviour` |
@@ -823,7 +823,7 @@ are in `coverage/`, one artefact per provider.
 | `GET` | `/v2/quota/{name}` | `exoscale/v2.get-quota` | `no-client` |
 | `GET` | `/v2/quota` | `exoscale/v2.list-quotas` | `client` `contract` `shape` `runtime` `probe` |
 
-### Served, and driven by no client (19)
+### Served, and driven by no client (18)
 
 Mounted operations no official client reaches, each with the reason. They
 are not refusals: they answer, and the probe validates them against the
@@ -843,7 +843,6 @@ reason that outlived its cause.
 - `compute` — 1 operation — `exo compute load-balancer service update --description ""` sends only the healthcheck block it re-sends on every call, so this CLI clears no field by either route and the per-field DELETE is never issued
 - `compute` — 1 operation — `exo compute load-balancer show` resolves a balancer by name, which it does by listing and filtering in the client, so the per-id read has no caller among the published clients
 - `compute` — 1 operation — `exo compute load-balancer update --description ""` sends an empty body rather than the empty value, so this CLI clears no field by either route and the per-field DELETE is never issued
-- `compute` — 1 operation — `exo compute security-group show` resolves a group by name, which it does by listing and filtering in the client, so the per-id read is never called
 - `compute` — 1 operation — copying a template targets another zone, and this emulator serves exactly one, so the CLI has nothing to copy to and no subcommand that would ask
 - `compute` — 1 operation — the CLI's --from-snapshot promotes through export-snapshot and a URL, which this pack declines, so it never issues the promote call the SDK declares
 - `compute` — 1 operation — the list this pack serves is empty, because an emulated account owns no dedicated hardware, so no client ever holds an id to read

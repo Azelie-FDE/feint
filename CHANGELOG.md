@@ -17,6 +17,41 @@ what this project is judged on: **a response shape a client can observe**, and
 
 ### Added
 
+- **Every identifier an Outscale answer publishes now names an object a read
+  answers for** (#389, #383, #378). One chain rather than three patches: the
+  image catalogue is backed by snapshots `ReadSnapshots` really serves, and
+  `CreateVms` cuts each machine a root BSU volume from the snapshot its image
+  names.
+
+  What a client sees change:
+
+  - `ReadImages` answers `BlockDeviceMappings` on every catalogue image —
+    `/dev/sda1`, its size, its type, `DeleteOnVmDeletion` and the `SnapshotId`
+    it was cut from — where the list was empty. A stack that sizes its root
+    device from the image read nothing.
+  - `ReadSnapshots` answers the three snapshots behind the catalogue, and a
+    volume can be cut from one.
+  - `CreateVms`, `ReadVms` and `UpdateVm` answer the machine's root device,
+    naming a volume `ReadVolumes` serves. It is how a stack finds the disk it
+    must not delete, and it was an empty list.
+  - `DeleteVms` destroys that volume and frees the ones the client linked, each
+    by its own `DeleteOnVmDeletion` — which `ReadVolumes` now publishes and
+    filters on per volume rather than as the constant `false`.
+  - `CreateImage` refuses an `Iops` on a device mapping instead of storing one.
+
+  **A limit moved**: an Outscale machine here owned no disk, and now owns one.
+  "Nothing left behind" changes meaning by that much for every suite — the
+  volume goes with the machine.
+
+  The measurement that reversed a premise: `Iops` was defaulted to 100 on the
+  ground that "the real cloud writes Iops on every image Bsu it returns". Of
+  the 399 device mappings the recorded account answers, **396 carry no `Iops`
+  key at all**, and the 3 that do are the 3 on a provisioned-IOPS volume type.
+  `shapes/outscale.json` is a union of everything ever observed, not a
+  per-element requirement. The field is declined with that measurement beside
+  it, and the four `corpus/accepted.json` exemptions this chain retires are
+  deleted.
+
 - **The shape axis was saturated at its own ceiling, and 619 recorded exchanges
   fed nothing** (#407). `shape` read 52 of 370 operations, and its ceiling
   was **also 52** — per cloud to the unit: exoscale 14,
@@ -868,6 +903,12 @@ what this project is judged on: **a response shape a client can observe**, and
   by a read, and the inventory taken before each run matched the one taken after.
 
 ### Changed
+
+- **The record is regenerated after the suites gained the calls the fold
+  surfaced** (#407): `driven` 344 to 345, `dataplane` 344 to 345, `behaviour`
+  316 to 317. **No operation lost anything on any axis**, checked operation by
+  operation against the replaced record rather than by comparing totals. `shape`
+  holds at 134, which is what the fold measured and not a second draw.
 
 - **The evidence record is regenerated on causal attribution, and `behaviour`
   reads 316** (#398). The committed record carried 312, a draw made before a
