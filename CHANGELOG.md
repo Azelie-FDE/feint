@@ -17,6 +17,92 @@ what this project is judged on: **a response shape a client can observe**, and
 
 ### Fixed
 
+- **Outscale is proven on every operation it serves: `shape` reaches 93 of 93**
+  (#427). The last four were the Net peering family, and they had been declared
+  unreachable twice — by #354 and again by this batch — for a reason that was
+  never about the code: a peering needs two Nets of one's own, the quota is
+  five, and four were held by the account's production infrastructure. A second,
+  empty account made the same four operations trivial to record.
+
+  The recording is folded into `shapes/outscale.json`; the transcript itself is
+  **not** committed as a corpus, and #438 carries why: its replay cascades from
+  one `CreateNet` conflict nobody has named, and writing 35 exemptions for an
+  unnamed cause is what `corpus/accepted.json` exists to prevent.
+
+- **A volume's `TaskId` is declined rather than invented, and the measurement is
+  why** (#427, #437). A real Outscale account answers `TaskId` on a volume, and
+  the naive reading of that is "the pack omits a field". It is not: of the eight
+  volume records the recording holds, **seven carry no `TaskId` at all**, and the
+  one that does is the volume with a resize in flight. It is a property of a
+  volume that *has* a task, and this emulator has none — a resize completes
+  inside the call. The `Iops` lesson of #389, a second time: a shape catalogue is
+  the union of every field ever observed, and reading a union as a per-record
+  requirement is how a defaulted value gets served to everybody.
+
+- **A load balancer frontend answers `certificate`, and it is null** (#427). The
+  real cloud carries the deprecated singular beside `certificate_ids` on every
+  frontend and on the frontend an ACL embeds; this emulator omitted the key.
+  Invisible to a client that decodes into a struct, visible to one that compares
+  field sets — and it was the recording of a real LB-S that turned "we serve no
+  certificates" from a silence into a stated answer. Null is the only value this
+  emulator could ever hold there, and it is the value that was observed.
+
+  Found by the omission gate of a conformance run, on eight operations at once,
+  the moment the new shapes were committed. The gate did exactly what it is for.
+
+- **The gateway offer was validated against a list nothing vouched for, and one
+  recording proved it cost 143 replay findings** (#427). A sanitised transcript
+  replaces every value a pack does not publish as its own, so a closed list the
+  pack answers `400` against and does not vouch for makes its own recording
+  unreplayable: the recorded `CreateGateway` was refused, and every read after
+  it addressed a gateway that had never been created — 126 of the findings were
+  `GetGateway` "omitting" fields of an object that did not exist.
+
+  `PublicVocabulary` now reads `gatewayTypes` beside `knownZones` and
+  `knownRegions`, from the map rather than from a copy. Its comment used to say
+  the opposite in so many words — *"a commercial type … this emulator does not
+  validate a request against"* — and `createGateway` validates one.
+  `TestTheVocabularyVouchesForEveryListThePackValidatesAgainst` is written over
+  the maps, so an offer arriving cannot make it pass while the vocabulary
+  drifts, and four mutations in
+  `tools/falsify/specs/vocabulary-covers-what-it-validates.json` bite.
+
+- **The two `block/v1alpha1` creates answer the status the real cloud answers**
+  (#427). `CreateVolume` and `CreateSnapshot` answered `201`; both answer `200`
+  on a real `fr-par` account, measured on the wire on 2026-08-24. The third
+  product measured this way after `vpc/v2` and `ipam/v1`, and each is claimed
+  only for the product whose answer was seen.
+
+- **Ten of the shape axis's own points were earned by an empty body, and six of
+  them predate this batch** (#427). A `204` carries no body, so the field walk
+  decoded `nil` and wrote one entry at the empty path with type `null`. That
+  entry names no field and states no type of anything, but it makes
+  `len(Fields)` non-zero — and two consumers branch on exactly that: the shape
+  axis counts the operation *observed*, and `feint shapes --check` treats it as
+  having a shape to compare.
+
+  Measured on the committed `shapes/scaleway.json`: six operations carried it,
+  every one of them a `DELETE`. The axis therefore published 134 where 128 had
+  been observed. The count moved in the direction that reads like progress,
+  which is what kept it invisible.
+
+  A catalogue now holds no field at the root, on the way in and on the way out —
+  the second half because a file committed before the rule must not go on being
+  believed. `tools/falsify/specs/root-path-is-not-a-field.json` puts a phantom
+  field back on each side, and both mutations bite.
+
+- **Two Scaleway creates answer the status the real cloud answers, not the one
+  this pack assumed** (#427). `vpc/v2/API.CreateRoute` and `ipam/v1/API.BookIP`
+  answered `201` because every other create in the pack does; both answer `200`
+  on a real `fr-par` account, measured on the wire on 2026-08-24 and recorded in
+  `corpus/scaleway/scw-free-shapes.jsonl`.
+
+  Neither `scw` nor the Terraform provider would ever have reported it — both
+  accept any `2xx` and print no status — which is exactly how it could sit wrong
+  indefinitely. `CreateRoute` had even been named in a test comment as the
+  vpc/v2 create that was *not* measured and therefore kept the pack's `201`; the
+  exception is retired by the measurement it asked for.
+
 - **A run no longer leaves its networks on the host, and one that finds a
   previous run's is refused on the doorstep** (#426). `mise run evidence:update`
   could only be regenerated on a lucky run: leg 2 failed on any host with Incus,
@@ -961,6 +1047,19 @@ what this project is judged on: **a response shape a client can observe**, and
   by a read, and the inventory taken before each run matched the one taken after.
 
 ### Changed
+
+- **The record is regenerated on the new recordings, and `shape` reads 225 of
+  370** (#427). Outscale reaches **93 of 93**, its fifth complete axis; Scaleway
+  goes 37 to 99, Exoscale 31 to 33. The per-provider table lives in
+  `docs/routes.md`.
+
+  **Six operations lost the axis, and that is the correction rather than a
+  regression**: all six are `DELETE`s that had earned it through a phantom field
+  written at the empty path by a `204`. They are named — `DeleteVolume`,
+  `DeleteSSHKey`, `DeleteIP`, `DeleteServer`, `DeletePrivateNetwork`,
+  `DeleteVPC` — and checked operation by operation against the replaced record
+  rather than by comparing totals, because a total can hide a loss under a gain.
+  No other axis moved for any operation.
 
 - **The record is regenerated after the suites gained the calls the fold
   surfaced** (#407): `driven` 344 to 345, `dataplane` 344 to 345, `behaviour`

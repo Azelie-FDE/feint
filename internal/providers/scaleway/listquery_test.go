@@ -200,7 +200,9 @@ func TestBlockListsHonourTheDeclaredFilters(t *testing.T) {
 	for _, name := range []string{"banana", "apple"} {
 		body := fmt.Sprintf(`{"name":%q,"from_empty":{"size":10000000000},"tags":["team-%s"]}`, name, name)
 		status, out := do(t, ts, "POST", zone+"/volumes", body)
-		if status != http.StatusCreated {
+		// 200, not 201: measured on the wire against a real fr-par account on
+		// 2026-08-24, see blockCreateStatus.
+		if status != http.StatusOK {
 			t.Fatalf("create %s: status %d (%v)", name, status, out)
 		}
 		id, _ := out["id"].(string)
@@ -208,7 +210,7 @@ func TestBlockListsHonourTheDeclaredFilters(t *testing.T) {
 	}
 	status, out := do(t, ts, "POST", zone+"/snapshots",
 		fmt.Sprintf(`{"name":"snap-banana","volume_id":%q}`, ids["banana"]))
-	if status != http.StatusCreated {
+	if status != http.StatusOK {
 		t.Fatalf("create snapshot: status %d (%v)", status, out)
 	}
 
@@ -382,7 +384,7 @@ func TestIPAMListHonoursOrderAndResourceFilters(t *testing.T) {
 
 	// ...and one booked for a custom resource, whose holder carries a name.
 	book := fmt.Sprintf(`{"source":{"private_network_id":%q},"resource":{"mac_address":"02:00:00:aa:bb:01","name":"appliance-7"}}`, pnID)
-	if status, out = do(t, ts, "POST", region+"/ips", book); status != http.StatusCreated {
+	if status, out = do(t, ts, "POST", region+"/ips", book); status != http.StatusOK {
 		t.Fatalf("book ip: status %d (%v)", status, out)
 	}
 

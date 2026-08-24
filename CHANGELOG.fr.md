@@ -940,6 +940,20 @@ change ni l'un ni l'autre a sa place dans `git log`.
 
 ### Modifié
 
+- **Le registre est régénéré sur les nouveaux enregistrements, et `shape` vaut
+  225 sur 370** (#427). Outscale atteint **93 sur 93**, son cinquième axe complet ;
+  Scaleway passe de 37 à 99, Exoscale de 31 à 33. Le tableau par fournisseur
+  vit dans `docs/routes.md`.
+
+  **Six opérations perdent l'axe, et c'est la correction plutôt qu'une
+  régression** : les six sont des `DELETE` qui l'avaient gagné par un champ
+  fantôme écrit au chemin vide par un `204`. Elles sont nommées —
+  `DeleteVolume`, `DeleteSSHKey`, `DeleteIP`, `DeleteServer`,
+  `DeletePrivateNetwork`, `DeleteVPC` — et vérifiées opération par opération
+  contre le registre remplacé plutôt qu'en comparant des totaux, parce qu'un
+  total peut cacher une perte sous un gain. Aucun autre axe n'a bougé pour
+  aucune opération.
+
 - **Le registre est régénéré après que les suites ont gagné les appels que le
   repli a fait apparaître** (#407) : `driven` de 344 à 345, `dataplane` de 344 à
   345, `behaviour` de 316 à 317. **Aucune opération n'a rien perdu sur aucun
@@ -1095,6 +1109,100 @@ change ni l'un ni l'autre a sa place dans `git log`.
   replay sait qu'elles en sont.
 
 ### Corrigé
+
+- **Outscale est prouvé sur chaque opération qu'il sert : `shape` atteint 93 sur
+  93** (#427). Les quatre dernières étaient la famille de l'appairage de Nets,
+  déclarée hors d'atteinte deux fois — par #354 puis par ce lot — pour une raison
+  qui n'a jamais tenu au code : un appairage demande deux Nets à soi, le quota
+  est de cinq, et quatre étaient pris par l'infrastructure de production du
+  compte. Un second compte, vide, a rendu ces quatre opérations triviales à
+  enregistrer.
+
+  L'enregistrement est replié dans `shapes/outscale.json` ; la transcription
+  elle-même n'est **pas** commitée comme corpus, et #438 dit pourquoi : son rejeu
+  part en cascade depuis un conflit `CreateNet` que personne n'a nommé, et écrire
+  35 exemptions pour une cause non nommée est précisément ce que
+  `corpus/accepted.json` existe pour empêcher.
+
+- **Le `TaskId` d'un volume est décliné plutôt qu'inventé, et c'est la mesure qui
+  le dit** (#427, #437). Un vrai compte Outscale rend `TaskId` sur un volume, et
+  la lecture naïve en conclut « le pack omet un champ ». Non : sur les huit
+  enregistrements de volume que porte la recording, **sept ne portent aucun
+  `TaskId`**, et celui qui en porte un est le volume en cours de
+  redimensionnement. C'est une propriété d'un volume qui *a* une tâche, et cet
+  émulateur n'en a aucune : un redimensionnement s'y achève dans l'appel. La
+  leçon `Iops` de #389 une seconde fois : un catalogue de formes est l'union de
+  tous les champs jamais observés, et lire une union comme une exigence par
+  enregistrement, c'est ainsi qu'une valeur par défaut finit servie à tous.
+
+- **Un frontend de répartiteur rend `certificate`, et il vaut null** (#427). Le
+  vrai cloud porte le singulier déprécié à côté de `certificate_ids` sur chaque
+  frontend et sur le frontend qu'une ACL embarque ; cet émulateur omettait la
+  clé. Invisible pour un client qui décode dans une structure, visible pour un
+  client qui compare des ensembles de champs — et c'est l'enregistrement d'un
+  vrai LB-S qui a transformé « nous ne servons pas de certificats » d'un silence
+  en une réponse énoncée. Null est la seule valeur que cet émulateur pourrait y
+  porter, et c'est la valeur observée.
+
+  Trouvé par la garde d'omission d'une passe de conformance, sur huit opérations
+  d'un coup, dès les nouvelles formes commitées. La garde a fait exactement ce
+  pour quoi elle existe.
+
+- **L'offre de passerelle était validée contre une liste dont personne ne se
+  portait garant, et un enregistrement a prouvé que cela coûtait 143 constats de
+  rejeu** (#427). Une transcription assainie remplace toute valeur qu'un pack ne
+  publie pas comme sienne : une liste fermée contre laquelle le pack répond
+  `400` sans s'en porter garant rend donc son propre enregistrement
+  irrejouable. Le `CreateGateway` enregistré a été refusé, et chaque lecture
+  suivante s'adressait à une passerelle jamais créée — 126 des constats étaient
+  `GetGateway` « omettant » les champs d'un objet inexistant.
+
+  `PublicVocabulary` lit désormais `gatewayTypes` à côté de `knownZones` et
+  `knownRegions`, depuis la table et non depuis une copie. Son commentaire
+  affirmait le contraire, mot pour mot : « un type commercial … cet émulateur ne
+  valide pas une requête contre ». `createGateway` en valide un.
+  `TestTheVocabularyVouchesForEveryListThePackValidatesAgainst` est écrit sur les
+  tables, de sorte qu'une offre nouvelle ne peut pas le faire passer pendant que
+  le vocabulaire dérive, et quatre mutations de
+  `tools/falsify/specs/vocabulary-covers-what-it-validates.json` mordent.
+
+- **Les deux créations `block/v1alpha1` rendent le statut que le vrai cloud
+  rend** (#427). `CreateVolume` et `CreateSnapshot` rendaient `201` ; les deux
+  rendent `200` sur un vrai compte `fr-par`, mesuré sur le fil le 2026-08-24.
+  Troisième produit mesuré ainsi après `vpc/v2` et `ipam/v1`, et chacun n'affirme
+  que pour le produit dont la réponse a été vue.
+
+- **Dix des points de l'axe `shape` étaient gagnés par un corps vide, et six
+  d'entre eux précèdent ce lot** (#427). Un `204` ne porte aucun corps : le
+  parcours des champs décodait `nil` et écrivait une entrée au chemin vide, de
+  type `null`. Cette entrée ne nomme aucun champ et n'énonce le type de rien,
+  mais elle rend `len(Fields)` non nul — et deux consommateurs se branchent
+  exactement là-dessus : l'axe `shape` compte l'opération comme *observée*, et
+  `feint shapes --check` la traite comme ayant une forme à comparer.
+
+  Mesuré sur le `shapes/scaleway.json` commité : six opérations la portaient,
+  toutes des `DELETE`. L'axe publiait donc 134 là où 128 avaient été observées.
+  Le compte bougeait dans le sens qui ressemble à un progrès, et c'est ce qui
+  l'a rendu invisible.
+
+  Un catalogue ne retient plus aucun champ à la racine, à l'entrée comme à la
+  sortie — la seconde moitié parce qu'un fichier commité avant la règle ne doit
+  pas continuer d'être cru. `tools/falsify/specs/root-path-is-not-a-field.json`
+  remet un champ fantôme de chaque côté, et les deux mutations mordent.
+
+- **Deux créations Scaleway rendent le statut que le vrai cloud rend, et non
+  celui que le pack supposait** (#427). `vpc/v2/API.CreateRoute` et
+  `ipam/v1/API.BookIP` rendaient `201` parce que toutes les autres créations du
+  pack le font ; les deux rendent `200` sur un vrai compte `fr-par`, mesuré sur
+  le fil le 2026-08-24 et enregistré dans
+  `corpus/scaleway/scw-free-shapes.jsonl`.
+
+  Ni `scw` ni le fournisseur Terraform ne l'auraient jamais signalé : tous deux
+  acceptent n'importe quel `2xx` et n'affichent aucun statut. C'est exactement
+  ainsi qu'une erreur pareille survit indéfiniment. `CreateRoute` était même
+  nommée dans un commentaire de test comme la création vpc/v2 *non mesurée*, qui
+  gardait donc le `201` du pack : l'exception est levée par la mesure qu'elle
+  réclamait.
 
 - **L'axe `behaviour` était une fonction de l'ordonnanceur, et deux exécutions
   identiques s'accordaient sur le total en désaccord sur six opérations**
