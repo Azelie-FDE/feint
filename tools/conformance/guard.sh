@@ -232,14 +232,22 @@ guard_leftovers() {
     exit 1
   fi
   machines="$(printf '%s' "$health" | jq -r '.machines // "none"')"
-  guard_leftovers_for "$machines"
+  # in-flight, deliberately. This form is called by the network suites, twelve
+  # steps into a run, and an emulator is answering at $endpoint — so the
+  # machines and networks on the host are that emulator's own, not an earlier
+  # run's. Asking the doorstep question here fails a run for owning what it just
+  # created; it did, on 2026-08-24 (#426).
+  guard_leftovers_for "$machines" inflight
 }
 
 # guard_leftovers_for is the same refusal for a caller that has no emulator to
 # ask yet: `mise run conformance` runs it before it starts anything, from the
 # mode it is about to pass to `feint start`.
 guard_leftovers_for() {
-  local machines="${1:-off}" binary
+  local machines="${1:-off}" scope="${2:-inflight}" binary doorstep=""
+  # Only the caller that runs before `feint start` may ask what an earlier run
+  # left standing: see guard_leftovers above for what happens otherwise.
+  [ "$scope" = "doorstep" ] && doorstep="--doorstep"
 
   # With no machine runtime nothing will take an address block, so the question
   # does not apply. Said out loud rather than returned in silence, per the rule
@@ -266,18 +274,25 @@ EOF
     exit 1
   fi
 
-  if ! "$binary" clean --check --vm "$machines" >&2; then
+  if ! "$binary" clean --check $doorstep --vm "$machines" >&2; then
     cat >&2 <<EOF
 
-FAIL: a DHCP service left behind by a run holds an address block on this host,
-and this user cannot end it. Its pid, its block and the reason are named above.
+FAIL: this host still holds what an earlier run left. What was found is named
+above: a network or a machine of a previous run, or a DHCP service this user
+cannot end it being another user's.
 
-Usually it belongs to the runtime's own user rather than to you: Incus starts
-the DHCP service of every managed bridge under the incus account. Nothing in
-this suite may signal it either way: a conformance run that escalated to end a
-daemon it did not start would be a worse defect than the one it works around.
+A network of an earlier run is not harmless plumbing (#426). Its name is derived
+from the resource that made it, so the next run never reuses it: it asks for a
+new name carrying the same block, and the runtime refuses that at the DHCP bind,
+minutes in, with "Address already in use".
 
-Run:  sudo $binary clean --vm $machines
+Nothing in this suite removes any of it. A conformance run that escalated to end
+a daemon it did not start would be a worse defect than the one it works around,
+so the command is printed for you to run with your own hands. Networks and
+machines need no privilege; a DHCP service of the runtime's own user does.
+
+Run:  $binary clean --vm $machines        (networks and machines)
+      sudo $binary clean --vm $machines   (if a DHCP service was named)
 
 That is this same sweep, elevated by you on purpose. It re-asks every ownership
 question at the moment of the signal, so it ends only what this emulator can
@@ -292,7 +307,7 @@ EOF
 # leg refuses at second zero instead of after every client suite has run.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in
-    leftovers) guard_leftovers_for "${2:-off}" ;;
+    leftovers) guard_leftovers_for "${2:-off}" doorstep ;;
     *)
       echo "usage: tools/conformance/guard.sh leftovers <machine runtime>" >&2
       echo "  (the other guards take an endpoint and are sourced, not run)" >&2

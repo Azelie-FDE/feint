@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stephrobert/feint/internal/core/machine"
 )
@@ -30,6 +32,23 @@ func swapLeftoverSeams(t *testing.T, find func() ([]machine.DHCPLeftover, error)
 	savedFind, savedEnd := findLeftoverDHCP, endLeftoverDHCP
 	findLeftoverDHCP, endLeftoverDHCP = find, end
 	t.Cleanup(func() { findLeftoverDHCP, endLeftoverDHCP = savedFind, savedEnd })
+
+	// The runtime survey is swapped for the same reason as the /proc scan above,
+	// and #426 is why it had to be added here rather than in each test. Since
+	// the doorstep started asking what the machine runtime holds, these tests
+	// read the tester's own Incus: they went red, all three at once, while a
+	// `mise run evidence:update` on the same station was holding a network — an
+	// assertion about shared state failing for somebody else's timing, which is
+	// the pattern that teaches "re-run until green".
+	//
+	// A test that means to drive a runtime holding something overrides this
+	// afterwards; withDriver in clean_ledger_test.go is that override, and it
+	// works because a later swap wins.
+	savedSurvey := surveyRuntime
+	surveyRuntime = func(context.Context, machine.Driver) (machine.Leftovers, bool, error) {
+		return machine.Leftovers{}, false, nil
+	}
+	t.Cleanup(func() { surveyRuntime = savedSurvey })
 }
 
 func TestDoctorNamesTheDHCPServiceThatOutlivedItsInterface(t *testing.T) {
@@ -123,7 +142,7 @@ func TestCleanEndsTheLeftoverDHCPService(t *testing.T) {
 		func(l machine.DHCPLeftover) error { ended = append(ended, l); return nil })
 
 	var out bytes.Buffer
-	if err := sweepLeftoverDHCP(&out, "incus"); err != nil {
+	if err := sweepLeftoverDHCP(&out, newLedger(&out, false, time.Now()), "incus"); err != nil {
 		t.Fatalf("a swept leftover still failed the sweep: %v", err)
 	}
 	if len(ended) != 1 || ended[0].PID != aLeftover.PID {
@@ -145,7 +164,7 @@ func TestCleanReportsTheCommandWhenTheLeftoverBelongsToAnotherUser(t *testing.T)
 		func(machine.DHCPLeftover) error { return fmt.Errorf("signal: %w", os.ErrPermission) })
 
 	var out bytes.Buffer
-	err := sweepLeftoverDHCP(&out, "incus")
+	err := sweepLeftoverDHCP(&out, newLedger(&out, false, time.Now()), "incus")
 	if err == nil {
 		t.Fatal("a block still held was reported as swept")
 	}
@@ -193,7 +212,7 @@ func TestCleanCheckRefusesAHostWhoseLeftoverThisUserCannotEnd(t *testing.T) {
 	swapProbeSeam(t, func(machine.DHCPLeftover) error { return fmt.Errorf("signal: %w", os.ErrPermission) })
 
 	var out bytes.Buffer
-	err := reportStuckLeftovers(&out, "incus")
+	err := reportStuckLeftovers(&out, newLedger(&out, false, time.Now()), "incus", false)
 	if err == nil {
 		t.Fatal("a host whose block is held by a process nobody here may end was reported as ready")
 	}
@@ -221,7 +240,7 @@ func TestCleanCheckPassesWhenTheSweepItselfWouldClearThem(t *testing.T) {
 	swapProbeSeam(t, func(machine.DHCPLeftover) error { return nil })
 
 	var out bytes.Buffer
-	if err := reportStuckLeftovers(&out, "incus"); err != nil {
+	if err := reportStuckLeftovers(&out, newLedger(&out, false, time.Now()), "incus", false); err != nil {
 		t.Fatalf("a leftover this user can end refused the run: %v\n%s", err, out.String())
 	}
 	report := out.String()
@@ -243,7 +262,7 @@ func TestCleanCheckSaysSoOnAHostWithNothingLeftBehind(t *testing.T) {
 	swapProbeSeam(t, func(machine.DHCPLeftover) error { t.Fatal("a check probed a process it never found"); return nil })
 
 	var out bytes.Buffer
-	if err := reportStuckLeftovers(&out, "incus"); err != nil {
+	if err := reportStuckLeftovers(&out, newLedger(&out, false, time.Now()), "incus", false); err != nil {
 		t.Fatalf("a clean host was refused: %v", err)
 	}
 	if !strings.Contains(out.String(), "no DHCP service") {
@@ -269,7 +288,7 @@ func TestCleanSaysWhatItWillNotTouchWhenTheBridgeSurvived(t *testing.T) {
 		func(l machine.DHCPLeftover) error { ended = append(ended, l); return nil })
 
 	var out bytes.Buffer
-	if err := sweepLeftoverDHCP(&out, "incus"); err != nil {
+	if err := sweepLeftoverDHCP(&out, newLedger(&out, false, time.Now()), "incus"); err != nil {
 		t.Fatalf("a swept leftover still failed the sweep: %v", err)
 	}
 	if len(ended) != 1 || ended[0].PID != survivor.PID {
@@ -292,7 +311,7 @@ func TestCleanSaysNothingAboutDHCPOnAHealthyHost(t *testing.T) {
 		func(machine.DHCPLeftover) error { t.Fatal("a healthy host was signalled"); return nil })
 
 	var out bytes.Buffer
-	if err := sweepLeftoverDHCP(&out, "incus"); err != nil {
+	if err := sweepLeftoverDHCP(&out, newLedger(&out, false, time.Now()), "incus"); err != nil {
 		t.Fatalf("a healthy host failed the sweep: %v", err)
 	}
 	if out.Len() != 0 {
