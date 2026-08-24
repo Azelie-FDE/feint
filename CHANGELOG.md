@@ -17,6 +17,50 @@ what this project is judged on: **a response shape a client can observe**, and
 
 ### Fixed
 
+- **`scw instance security-group list-default-rules` reaches a rule set instead
+  of a 404, a rule answers `dest_ip_range`, and a private NIC answers the date
+  it last changed** (#431, #432, #436). Three shapes a real `fr-par` account
+  answered that no document could have found.
+
+  `default` is a literal segment of the path Scaleway's own SDK builds, not an
+  identifier, and this pack read it as one: the segment matched `{id}`, found no
+  group, and answered 404 — so `instance/v1/API.ListDefaultSecurityGroupRules`
+  read as *declined* in the coverage record while a live route answered the
+  command wrong. It is now served, with the six account-wide outbound SMTP drops
+  the recording measured, none of them editable, and the real CLI drives it in
+  the conformance suite.
+
+  `dest_ip_range` is on the wire on every security-group rule and is declared
+  **neither** by Scaleway's published document **nor** by their own Go SDK. It
+  is served as `null`, which is what the cloud answers, on all five operations
+  that hand back a rule.
+
+  A private NIC answered a creation date and no `modification_date`, on the
+  create, the read and the list alike.
+
+- **A load balancer answers the node it runs on, a backend answers the three
+  defaults the cloud fills in, and a public gateway address answers a reverse**
+  (#434, #435). Ninety of the divergences a real `fr-par` recording found had
+  five causes between them, and each is a shape a client reads.
+
+  A backend created without `send_proxy_v2`, `ssl_bridging` or `host` answered
+  `null` on all three where the cloud answers `false`, `false` and `""`; the
+  three fields appear on eleven operations, because a frontend nests a backend
+  and an ACL nests a frontend. A balancer published an empty `instances` array
+  where the cloud publishes one node — the recording reversed the argument that
+  kept it empty, since the cloud's own node carries `ip_address: ""`, so what
+  was being withheld was the shape and not an address. A gateway address
+  answered `reverse: null` where the cloud always answers a name. And a list of
+  `lb` or `vpc-gw` addresses that named no project was scoped to this pack's own
+  default project, so a client that created an address under its own project got
+  an empty page.
+
+  Two fields are now **declined with their reason** instead of being answered
+  hollow: a gateway's `version`, which is the version of software this emulator
+  does not run, and the elements of `bastion_allowed_ips`, whose three writing
+  operations were already declined — a filter no client can edit and nothing
+  enforces is not a filter.
+
 - **An operation whose API description says it answers no body is now checked
   against exactly that, and thirty-one Scaleway operations stop reading
   "nobody looked"** (#429). Scaleway writes `204: {description: ''}` on 64 of

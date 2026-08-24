@@ -1131,6 +1131,54 @@ change ni l'un ni l'autre a sa place dans `git log`.
 
 ### Corrigé
 
+- **`scw instance security-group list-default-rules` atteint un jeu de règles au
+  lieu d'un 404, une règle publie `dest_ip_range`, et une NIC privée publie sa
+  date de dernière modification** (#431, #432, #436). Trois formes qu'un vrai
+  compte `fr-par` a répondues et qu'aucun document n'aurait pu trouver.
+
+  `default` est un segment littéral du chemin que construit le SDK de Scaleway,
+  pas un identifiant, et ce pack le lisait comme tel : le segment correspondait à
+  `{id}`, ne trouvait aucun groupe et répondait 404 — si bien que
+  `instance/v1/API.ListDefaultSecurityGroupRules` se lisait « décliné » dans le
+  registre de couverture pendant qu'une route vivante répondait faux à la
+  commande. Elle est désormais servie, avec les six blocages SMTP sortants que
+  l'enregistrement a mesurés, aucun modifiable, et le vrai CLI la pilote dans la
+  suite de conformité.
+
+  `dest_ip_range` est sur le fil de chaque règle de groupe de sécurité et n'est
+  déclaré **ni** par la description d'API publiée de Scaleway **ni** par leur
+  propre SDK Go. Il est servi à `null`, ce que répond le cloud, sur les cinq
+  opérations qui rendent une règle.
+
+  Une NIC privée publiait une date de création et aucune `modification_date`,
+  sur la création, la lecture et la liste.
+
+
+- **Un répartiteur publie le nœud sur lequel il tourne, un backend publie les
+  trois valeurs par défaut que le cloud remplit, et l'adresse d'une passerelle
+  publique publie un reverse** (#434, #435). Quatre-vingt-dix des divergences
+  qu'un enregistrement réel de `fr-par` a trouvées tenaient à cinq causes, et
+  chacune est une forme qu'un client lit.
+
+  Un backend créé sans `send_proxy_v2`, `ssl_bridging` ni `host` répondait
+  `null` sur les trois là où le cloud répond `false`, `false` et `""` ; les
+  trois champs apparaissent sur onze opérations, parce qu'un frontend contient
+  un backend et une ACL contient un frontend. Un répartiteur publiait un tableau
+  `instances` vide là où le cloud en publie un nœud — l'enregistrement a
+  renversé l'argument qui le gardait vide, puisque le nœud du cloud porte
+  lui-même `ip_address: ""` : ce qui était retenu était la forme, pas une
+  adresse. L'adresse d'une passerelle répondait `reverse: null` là où le cloud
+  répond toujours un nom. Et une liste d'adresses `lb` ou `vpc-gw` ne nommant
+  aucun projet était réduite au projet par défaut de ce pack, si bien qu'un
+  client ayant créé une adresse dans son propre projet recevait une page vide.
+
+  Deux champs sont désormais **déclinés avec leur raison** plutôt que servis
+  creux : la `version` d'une passerelle, qui est celle d'un logiciel que cet
+  émulateur ne fait pas tourner, et les éléments de `bastion_allowed_ips`, dont
+  les trois opérations d'écriture étaient déjà déclinées — un filtre qu'aucun
+  client ne peut modifier et que rien n'applique n'est pas un filtre.
+
+
 - **Outscale est prouvé sur chaque opération qu'il sert : `shape` atteint 93 sur
   93** (#427). Les quatre dernières étaient la famille de l'appairage de Nets,
   déclarée hors d'atteinte deux fois — par #354 puis par ce lot — pour une raison
