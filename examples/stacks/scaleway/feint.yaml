@@ -1,0 +1,46 @@
+# The environment this stack needs, declared once.
+#
+# `feint up` reads this file and does the whole of it: it checks the host, starts
+# the emulator, exports what the Scaleway clients need, runs Terraform here, and
+# waits for the conditions below against the emulator's own API. `feint down`
+# takes it back down.
+#
+# docs/environment.md is the field reference and the reason each line is here.
+version: 1
+
+cloud:
+  provider: scaleway
+
+emulator:
+  addr: 127.0.0.1:4599
+
+# Nothing here boots a machine: the stack asserts the control plane. Set this to
+# incus, incus-vm or incus-ovn — and `feint up` refuses if the host cannot
+# deliver it, rather than downgrading in silence.
+runtime:
+  mode: off
+  # What this stack boots when the mode above is not `off`: every server here
+  # asks for `ubuntu_jammy`, which the catalogue maps to ubuntu:22.04. Declared
+  # rather than discovered — `feint up` checks the station holds it and names
+  # `feint images --only ubuntu/22.04` when it does not, before anything starts.
+  # Under `off` nothing boots, and the check says it is skipping for that reason.
+  images:
+    - ubuntu/22.04
+
+iac:
+  engine: terraform
+  directory: .
+  vars:
+    # The stack declares a variable `endpoint` whose default is 127.0.0.1:4599.
+    # Left to that default against an emulator on another port, Terraform blocks
+    # to its own ceiling and the message blames the provider. Written once, here.
+    endpoint: ${feint.endpoint}
+
+# Asserted against the emulator, never against Terraform's state file: six
+# machines, two VPCs and the load balancer the stack puts in front of the web
+# tier.
+ready:
+  - http:/instance/v1/zones/fr-par-1/servers
+  - resource:instance/server:6
+  - resource:vpc/vpc:2
+  - resource:lb/lb:1

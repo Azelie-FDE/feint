@@ -17,6 +17,67 @@ change ni l'un ni l'autre a sa place dans `git log`.
 
 ## [Unreleased]
 
+### Ajouté
+
+- **`feint.yaml`, et les deux verbes qui le lisent : `feint up` et `feint down`
+  (#189, #190).** Les drapeaux qui décident de ce que l'émulateur d'un collègue
+  sait faire — quel runtime, quel provider, quels contrats, quel état de départ
+  — vivaient dans un historique de shell et dans un paragraphe de README, et un
+  dépôt qui en exigeait un précis n'avait aucun moyen de le dire. Une
+  déclaration à la racine le dit désormais, et `feint up` la lit : il contrôle
+  que l'hôte peut livrer le runtime nommé et **refuse avant que rien ne
+  démarre** plutôt que de dégrader, démarre l'émulateur avec l'état et les
+  contrats déclarés, exporte l'environnement client du pack lui-même, lance le
+  moteur dans le répertoire déclaré en laissant passer sa sortie telle quelle,
+  attend chaque condition `ready:` à voix haute et avec une échéance, puis
+  imprime les points d'entrée. `feint down` détruit puis arrête, en disant ce
+  qu'il jette.
+
+  Le schéma est fermé : **une clé qu'il ne nomme pas est refusée par son nom au
+  chargement**, avec la liste de celles que ce bloc accepte, de sorte qu'un
+  fichier mal tapé échoue au chargement et non au premier comportement
+  surprenant. Ce que ce fichier ne porte délibérément pas est refusé avec sa
+  raison plutôt qu'en clé inconnue — `emulator.coverage`, `emulator.shapes`,
+  `emulator.expose_to_network` et `proxy` disent chacun où vit réellement ce que
+  le lecteur cherchait. Et une clé que le schéma connaît et qu'aucun verbe ne lit
+  encore est annoncée au chargement : un fichier qui accepte tout et n'applique
+  qu'une partie est le mensonge exact que ce projet existe pour éviter.
+
+  `up` compose le cycle de vie au lieu de le remplacer : il rend la déclaration
+  dans les drapeaux que `feint start` accepte déjà, si bien que `status`, `logs`
+  et `stop` connaissent l'instance qu'il a montée. La surface CLI passe en
+  version 18 pour les deux verbes ; rien n'a été retiré, aucun code de sortie
+  n'a bougé.
+
+  Quatre pièges disparaissent, chacun payé à la main le 2026-08-24 en appliquant
+  les trois stacks d'exemple : un module local qu'une copie des `*.tf` laisse
+  derrière (le moteur tourne dans le répertoire déclaré, en place) ; une variable
+  `endpoint` dont le défaut vise un port où rien n'écoute (`iac.vars`, avec
+  `${feint.endpoint}` pour seule substitution) ; un endpoint dont le chemin `/v2`
+  appartient à la valeur chez un provider et pas chez les autres (il vient de
+  l'`Env` du pack, jamais d'un champ) ; et `FEINT_EXOSCALE_ALLOW_TERRAFORM`, lu
+  côté serveur, donc inopérant s'il est exporté après le démarrage
+  (`emulator.env`, posé avant le spawn).
+
+  Éprouvé sous un vrai runtime de machines, et pas seulement en plan de
+  contrôle : la même déclaration Scaleway avec `--runtime incus-ovn` a appliqué
+  50 ressources, replanifié vide et détruit, et l'hôte portait ce que l'API
+  décrivait — six conteneurs en marche, trois réseaux OVN sur les blocs que la
+  stack déclare, trois jeux de règles marqués `feint security group` répartis sur
+  six interfaces, une ACL d'isolation par réseau, et rien après `feint down`.
+  `runtime.images` est contrôlé sur la station avant que rien ne démarre et
+  n'est jamais construit, avec trois réponses plutôt que deux : présente,
+  absente du jeu de préchauffage et refusée avec `feint images --only <nom>`, ou
+  hors de ce jeu et annoncée comme un premier démarrage qui en dérivera une. Un
+  runtime que l'hôte ne peut pas livrer est refusé avant tout démarrage, en
+  nommant la moitié manquante et les trois portes qui restent.
+
+  Chaque stack d'exemple porte sa déclaration, et
+  `tools/conformance/environment/` pilote les deux verbes sur un dépôt fixture
+  en `--vm off`. [docs/environment.md](docs/environment.md) décrit le chemin de
+  `git clone` à un `terraform apply` qui passe, et sa référence de champs est
+  générée depuis le schéma, sur le rail de `feint docs --check`.
+
 ### Modifié
 
 - **Le bloc public Outscale émulé est un `/28`, plus un `/24`, et la suite de
