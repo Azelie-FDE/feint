@@ -46,7 +46,20 @@ const (
 	DefaultUplinkCIDR = "10.209.83.0/24"
 )
 
-// delegateRoute adds one block to the uplink's ipv4.routes. The caller holds
+// queueUplinkRoute registers one block as waiting for delegation. Called
+// before uplinkMu is taken, so the current holder of the lock can drain the
+// queue into its own write; delegateQueuedRoutes is the other half.
+func (d *Incus) queueUplinkRoute(block string) {
+	d.uplinkQueueMu.Lock()
+	if d.uplinkQueue == nil {
+		d.uplinkQueue = map[string]bool{}
+	}
+	d.uplinkQueue[block] = true
+	d.uplinkQueueMu.Unlock()
+}
+
+// delegateQueuedRoutes adds the caller's block, and every block queued behind
+// the lock, to the uplink's ipv4.routes in a single write. The caller holds
 // uplinkMu — see the field's comment for the measured reason there is no safe
 // unserialised edit of the uplink.
 //
@@ -56,17 +69,39 @@ const (
 // it is never the uplink's own /24, the block has to be delegated as the network
 // is created.
 //
-// One block at a time, never a blanket range. Delegating 10.0.0.0/8 up front
-// looks tidier and fails: Incus turns each route into a real route on the host,
-// and a /8 collides with whatever already lives in that space — measured on a
-// machine whose own bridge sat at 10.108.0.0/24, where the whole uplink then
-// refused to come up.
+// The whole queue at once, because every write to the uplink makes the daemon
+// clear and rebuild its firewall — measured at ~1 s per write on Incus 7.2 —
+// and a terraform apply issues its subnet creates concurrently: one write per
+// create put fifteen rebuilds in a serial queue, which is a third of the
+// straight line of #473. Draining the queue is an optimisation, never the
+// guarantee: a caller's own block is always ensured under its own turn of the
+// lock, so a failed batched write costs the others nothing but a retry at
+// their turn, where addUplinkRoutes finds the block still missing.
+// TestConcurrentOVNCreatesShareTheirUplinkWrites fails without the draining.
+//
+// Still one block per network, never a blanket range. Delegating 10.0.0.0/8 up
+// front looks tidier and fails: Incus turns each route into a real route on the
+// host, and a /8 collides with whatever already lives in that space — measured
+// on a machine whose own bridge sat at 10.108.0.0/24, where the whole uplink
+// then refused to come up.
 //
 // Idempotent by construction: a block already delegated is left alone, so
 // creating the same network twice does not grow the list.
-func (d *Incus) delegateRoute(ctx context.Context, block string) error {
-	if err := d.addUplinkRoute(ctx, block); err != nil {
-		return fmt.Errorf("delegate %s to uplink %s: %w", block, d.uplinkName(), err)
+func (d *Incus) delegateQueuedRoutes(ctx context.Context, own string) error {
+	d.uplinkQueueMu.Lock()
+	blocks := make([]string, 0, len(d.uplinkQueue)+1)
+	for block := range d.uplinkQueue {
+		blocks = append(blocks, block)
+	}
+	d.uplinkQueue = nil
+	d.uplinkQueueMu.Unlock()
+	if !slices.Contains(blocks, own) {
+		blocks = append(blocks, own)
+	}
+	// Sorted so two runs write the same value and a log diff means something.
+	slices.Sort(blocks)
+	if err := d.addUplinkRoutes(ctx, blocks); err != nil {
+		return fmt.Errorf("delegate %s to uplink %s: %w", own, d.uplinkName(), err)
 	}
 	return nil
 }
@@ -664,6 +699,18 @@ func (d *Incus) routeAddressOVN(ctx context.Context, spec AddressSpec) error {
 	if err := d.mustOwn(ctx, network); err != nil {
 		return err
 	}
+	// Exclusive on the NIC's network for the whole edit. The route keys are
+	// not live-updatable on an OVN NIC, so the set below re-plugs the device,
+	// and the daemon then re-ensures every rule set the network references —
+	// resolving names to IDs with no lock shared with its own ACL paths. An
+	// isolation detach running concurrently (IsolateNetwork holds this same
+	// lock) deletes the referenced set between the two steps, and the edit
+	// dies on `Cannot find security ACL ID for "iso-fnt-…"` with the failed
+	// update operation holding the instance busy — the first link of #493's
+	// chain. Same lock, so the edit and the detach take turns.
+	// TestARouteAddressEditAndAnIsolationDetachTakeTurns fails without it.
+	release := d.networkLock(network)
+	defer release()
 	devices, err := d.instanceDevices(ctx, spec.Machine)
 	if err != nil {
 		return fmt.Errorf("inspect %s: %w", spec.Machine, err)
@@ -731,19 +778,53 @@ func (d *Incus) unrouteAddressOVN(ctx context.Context, machine, address string) 
 			if !routeListContains(cfg["ipv4.routes.external"], route) {
 				continue
 			}
-			kept := removeRoute(cfg["ipv4.routes.external"], route)
-			if _, err := d.run(ctx, "config", "device", "set", machine, device,
-				"ipv4.routes.external="+kept); err != nil {
-				return fmt.Errorf("unroute %s from %s/%s: %w", address, machine, device, err)
-			}
-			// The re-plug already dropped every guest address, including the
-			// public one; the repair puts back only what stays.
-			if err := d.repairGuestInterface(ctx, machine, cfg["network"], device); err != nil {
+			if err := d.unrouteOVNDevice(ctx, machine, device, cfg["network"], address); err != nil {
 				return err
 			}
 		}
 	}
 	return d.setUplinkRoute(ctx, address, false)
+}
+
+// unrouteOVNDevice takes one public address off one OVN NIC, holding the
+// network's lock across the edit and its repair.
+//
+// The lock is the ordering half of #493: the set below re-plugs the device,
+// the daemon re-ensures every rule set the NIC's network references while
+// setting the OVN port back up, and an isolation detach landing between the
+// two steps leaves it resolving a rule set that no longer exists — `Cannot
+// find security ACL ID for "iso-fnt-…"`, with the failed update operation
+// holding the instance busy against the stop and remove that follow. The
+// detach holds this same lock (IsolateNetwork), so the two take turns; taken
+// per device, because the loop above walks NICs that may sit on different
+// networks and each edit only needs its own.
+// TestAPublicAddressEditAndAnIsolationDetachTakeTurns fails without it.
+func (d *Incus) unrouteOVNDevice(ctx context.Context, machine, device, network, address string) error {
+	if network != "" {
+		release := d.networkLock(network)
+		defer release()
+	}
+	devices, err := d.instanceDevices(ctx, machine)
+	if err != nil {
+		if isNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("inspect %s: %w", machine, err)
+	}
+	cfg := devices.own[device]
+	route := address + "/32"
+	if !routeListContains(cfg["ipv4.routes.external"], route) {
+		// Withdrawn while this call waited for the lock: nothing left to undo.
+		return nil
+	}
+	kept := removeRoute(cfg["ipv4.routes.external"], route)
+	if _, err := d.run(ctx, "config", "device", "set", machine, device,
+		"ipv4.routes.external="+kept); err != nil {
+		return fmt.Errorf("unroute %s from %s/%s: %w", address, machine, device, err)
+	}
+	// The re-plug already dropped every guest address, including the
+	// public one; the repair puts back only what stays.
+	return d.repairGuestInterface(ctx, machine, network, device)
 }
 
 // repairGuestInterface restores what a device re-plug cost the guest: the
@@ -895,16 +976,32 @@ func (d *Incus) setUplinkRoute(ctx context.Context, address string, add bool) er
 // alone; an entry already present is left as it is, so nothing is rebuilt for
 // nothing. The caller holds uplinkMu.
 func (d *Incus) addUplinkRoute(ctx context.Context, route string) error {
+	return d.addUplinkRoutes(ctx, []string{route})
+}
+
+// addUplinkRoutes is addUplinkRoute for a set: one read, and at most one
+// write, whatever the set's size — a write is what makes the daemon rebuild
+// the uplink's firewall, so entries already present cause none. The caller
+// holds uplinkMu.
+func (d *Incus) addUplinkRoutes(ctx context.Context, routes []string) error {
 	name := d.uplinkName()
 	out, err := d.run(ctx, "network", "get", name, "ipv4.routes")
 	if err != nil {
 		return fmt.Errorf("read routes on uplink %s: %w", name, err)
 	}
-	current := strings.TrimSpace(string(out))
-	if routeListContains(current, route) {
+	merged := strings.TrimSpace(string(out))
+	changed := false
+	for _, route := range routes {
+		if routeListContains(merged, route) {
+			continue
+		}
+		merged = appendRoute(merged, route)
+		changed = true
+	}
+	if !changed {
 		return nil
 	}
-	if _, err := d.run(ctx, "network", "set", name, "ipv4.routes="+appendRoute(current, route)); err != nil {
+	if _, err := d.run(ctx, "network", "set", name, "ipv4.routes="+merged); err != nil {
 		return err
 	}
 	return nil
