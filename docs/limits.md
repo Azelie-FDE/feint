@@ -3233,7 +3233,64 @@ bare beside `eth1` on a managed network carrying the rule set). The pack hands
 the set over, the driver refuses with the typed error, and the log names the
 declaring capability instead of crying wolf. The capability is therefore
 broader than the machine it was written for: it is about the *interface*, not
-about a machine with only one.
+about a machine with only one — and `machine.Capabilities.FirewallPublicOnly`
+says so in its own words since #548, because a declaration whose subject is
+wrong reads like proof.
+
+Reproduced from the API alone on 2026-08-27, without the stack, under
+`--vm incus-ovn`: a group whose inbound default is `drop` with one rule
+allowing 443, a server created with its flexible IP, its private NIC attached
+afterwards. The escape and its negative control are in the same probe.
+
+```console
+$ incus query /1.0/instances/feint-scw-d3eaa40c-… | jq -c '.expanded_devices | …'
+{"eth0":{"ipv4.address":"203.0.113.2","nictype":"routed","type":"nic"},
+ "eth1":{"ipv4.address":"10.181.7.2","network":"fnt-c9b63dbeff0","security.acls":"scw-3bab95b997b","type":"nic"}}
+
+  203.0.113.2:22   connect_ex=0    OPEN      # no rule opens 22: the group is not on eth0
+  203.0.113.2:80   connect_ex=111  refused   # reached the machine, nothing listening
+  10.181.7.2:80    connect_ex=113  no route  # the private side, where the policy holds
+```
+
+`connect_ex=111` on a port the group never opened is the decisive line: the
+packet reached the guest and was refused by it, where a covered interface
+would have dropped it.
+
+**The migration was tried, and it is refused.** #548 left one thing untried —
+whether the driver could move the address onto the managed NIC once that one
+arrives, which is the shape the other creation order already produces and the
+one the rule set covers. It was attempted by hand on 2026-08-27, on the very
+machine above, and stopped on two measured facts:
+
+```console
+$ incus network set feint-uplink ipv4.routes "…,203.0.113.2/32"
+Error: Failed to add route {… Dst: 203.0.113.2/32 …}: file exists
+$ incus config device remove feint-scw-d3eaa40c-… eth0
+$ incus query /1.0/instances/feint-scw-d3eaa40c-… | jq -c '…'
+{"eth0":{"network":"incusbr0","type":"nic"}, "eth1":{…}}
+```
+
+The uplink cannot be given the `/32` while the routed NIC still owns the host
+route for it — the collision #498 documents, met from the other side — so the
+address would have to leave the routed NIC first, and there is no ordering
+where it is delivered throughout. And removing the routed device unmasks the
+profile's `eth0` on `incusbr0`, the operator's own default bridge: the machine
+lands on a bridge this emulator refuses to put anything on. A sequence that
+gets there exists on paper (mask `eth0` with a `none` device, then delegate,
+then set `ipv4.routes.external`, then repair the guest) and it costs a
+reconfiguration of the public interface on every private-NIC attach, which
+Terraform performs on every apply. That trade was not taken; this paragraph is
+the record of the measurement rather than a plan.
+
+What #548 delivered instead is the naming: the refusal now carries every
+routed interface that escapes *and the addresses it delivers*
+(`eth0 (203.0.113.2)`), read from both `ipv4.address` and `ipv4.routes` so an
+address attached after the boot is named too, and the warning no longer calls
+the machine public-only.
+`TestTheUnenforceableRefusalNamesTheAddressThatEscapes`,
+`TestTheUnenforceableRefusalNamesAnAddressRoutedAfterTheLaunch` and
+`TestTheUnenforceableWarningDoesNotCallTheMachinePublicOnly` fail without it,
+and `tools/falsify/specs/uncovered-interface.json` replays all three.
 
 Second, between two machines of one subnet the sender's permissive
 egress still wins over the receiver's ingress default (the single-pipeline
@@ -3290,16 +3347,61 @@ answers. One counter-witness is on record and stays on record: #491's probe of
 station→private measurement that worked at least once in a configuration this
 finding does not explain. Both observations are written here as they were made.
 
+Re-measured on 2026-08-27 on fresh networks (`10.181.7.0/24`, one machine,
+zero ACL relevance to the result), with the capture this time rather than
+beside it:
+
+```console
+$ ip route show 10.181.7.0/24
+10.181.7.0/24 dev feint-uplink proto static scope link
+$ sudo tcpdump -ni feint-uplink 'host 10.181.7.2 or arp'
+ARP, Request who-has 10.181.7.2 tell 10.209.83.1   (x3, no answer)
+  10.181.7.2:22 connect_ex=11    10.181.7.2:80 connect_ex=113
+
+$ sudo ip route replace 10.181.7.0/24 via 10.209.83.128 dev feint-uplink
+  10.181.7.2:22 connect_ex=111   10.181.7.2:80 connect_ex=111
+```
+
+The flip's *new* fact is the value it flips to. With the `via` route the two
+ports stop being unreachable (11, 113) and become **refused** (111) — the
+receiving NIC's own rule set answering, since the group under test opened
+neither. So the router does forward for the subnet when it is addressed
+directly; what fails is the scope-link form's ARP, exactly as the capture
+shows.
+
+**Why it will not lift here, measured.** The earlier wording said the fix was
+to post the route `via` the network's router instead of `dev`-only, as if the
+emulator were choosing the form. It is not: the emulator never writes a host
+route. Its only host binary is `incus` — every `ip` in `internal/core/machine`
+runs as `incus exec <machine> -- ip …`, inside a guest — and the host route
+above is Incus's own materialisation of the uplink bridge's `ipv4.routes`,
+which an OVN network's subnet must sit inside or the network is refused
+("Uplink network doesn't contain … in its routes"). That key takes CIDRs and
+nothing else, measured on a scratch bridge on 2026-08-27:
+
+```console
+$ incus network set probe496br ipv4.routes=10.223.0.0/24
+$ ip route show 10.223.0.0/24
+10.223.0.0/24 dev probe496br proto static scope link
+$ incus network set probe496br ipv4.routes="10.224.0.0/24 via 10.222.222.2"
+Error: Invalid value for network "probe496br" option "ipv4.routes":
+  Item "10.224.0.0/24 via 10.222.222.2": invalid CIDR address
+```
+
+So lifting this means the emulator running `ip route` as root on the operator's
+host, which is a different program from the one this repository ships: the
+machine driver's whole blast radius is what `incus` will do for the user who
+started it. The remedy stays where it belongs, with whoever wants the path —
+one `ip route replace … via <volatile.network.ipv4.address>` per subnet, which
+the block above is the recipe for.
+
 Who this touches: any harness that probes a private address from the station,
 firewall proofs first. Machines between themselves are not concerned. The
 capability already says it — `capabilities.private_from_host` is `false` under
 OVN — so a consumer asks `/_feint/health` instead of probing blind (see "A
-public address is the provider's value, made to answer on the host"). What
-would lift it: posting the subnet route `via` the network's router address
-instead of `dev`-only, which is what #496 asks and what the manual
-`ip route replace` above demonstrated.
+public address is the provider's value, made to answer on the host").
 
-## A VPC created without `enable_routing` answers `routing_enabled=false` where the real cloud answers `true` (#497)
+## A VPC created without `enable_routing` answered `routing_enabled=false` where the real cloud answers `true` (#497, lifted 2026-08-27)
 
 The premise was verified on the real cloud before anything else (real account,
 2026-08-26, the test VPC deleted afterwards):
@@ -3309,11 +3411,13 @@ $ scw vpc vpc create name=feint-premise-routing        # no enable_routing
 RoutingEnabled                  true
 ```
 
-This emulator stores the request field as-is
-(`internal/providers/scaleway/vpc.go:207`,
+This emulator stored the request field as-is
+(`internal/providers/scaleway/vpc.go`,
 `res.Attrs["routing_enabled"] = req.EnableRouting`), so the Go zero value
-becomes the default — the inverse of upstream. The Scaleway example stack
-creates its two VPCs without the field, and both read back `false`:
+became the default — the inverse of upstream. The Scaleway example stack
+created its two VPCs without the field, and both read back `false` (its
+workload VPC has written `enable_routing = true` out since #503, for this
+reason; its management VPC still says nothing):
 
 ```console
 $ curl -s …/vpc/v2/regions/fr-par/vpcs | jq '.vpcs[] | {name, routing_enabled}'
@@ -3328,12 +3432,31 @@ the web group's rule accepts `0.0.0.0/0`. On the real cloud, two Private
 Networks of one routed VPC reach each other. Measured: the three blocks above.
 Deduced: nothing.
 
-What to do with it: declare `enable_routing = true` explicitly (Terraform) or
-`enable_routing` on the create. The stored value is the request's, so an
-explicit `true` is stored as `true`, and two networks of a routing VPC are
-joined the runtime's own way ("Subnet isolation depends on the runtime mode"
-carries that measurement). What would lift it: matching upstream's default at
-create, at the line named above.
+**The limit is gone; this section stays as its dated record.** The create no
+longer stores the Go zero of an absent field: `createVPCRequest.EnableRouting`
+is a pointer, and only a value the client actually sent overwrites the `true`
+`newVPC` already carried for the lazily provisioned default VPC. An explicit
+`false` is still stored as `false`, in either direction — the real-cloud
+measurement above covers the *absent* field and nothing else, and inventing an
+answer for a field that was sent is the guess this repository refuses.
+
+Re-measured after the fix, same runtime, 2026-08-27:
+
+```console
+$ curl -sH 'Content-Type: application/json' \
+    …/vpc/v2/regions/fr-par/vpcs -d '{"name":"audit-497"}' | jq .routing_enabled
+true
+$ incus network peer list fnt-e5ba51ab1fa          # two Private Networks of that VPC
+| fnt-aac94982924 | default/fnt-aac94982924 | local | CREATED |
+```
+
+The peering is the half that matters and the one the flag was never only about:
+`reachableFrom` reads it, so a default corrected in the view alone would have
+left the host exactly as it was — which is why
+`TestAVPCCreatedWithoutEnableRoutingRoutes` asserts on the peer list and not on
+the field, in both directions, and why
+`tools/falsify/specs/vpc-routing-default.json` replays it with the Go zero put
+back.
 
 ## An API reboot used to log `Failed to add route: file exists` for its own public /32 (#498, lifted 2026-08-27)
 
