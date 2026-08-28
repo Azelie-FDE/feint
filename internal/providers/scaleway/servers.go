@@ -192,29 +192,33 @@ const rootVolumeSize = 20_000_000_000
 // volumes endpoint, so the volume has to be a stored resource, not an inline
 // object.
 //
-// The type stays b_ssd whatever is asked, and there are two reasons, not one.
-// The single reason this comment used to give covered only half the values it
-// refuses, which is how a reader came to lift the restriction for the other
-// half — reported by @vde-dis on #8, with the measurement below.
+// The requested type is honoured for sbs_volume and refused for the LOCAL ones,
+// and there are two reasons, not one. The single reason this comment used to
+// give covered only half the values it refuses, which is how a reader came to
+// lift the restriction for the other half — reported by @vde-dis on #8, with the
+// measurement below. Both halves are stated here for that reason, and neither is
+// repeated inside the function.
 //
 // Against a *local* type (l_ssd, scratch): the catalogue declares
 // volumes_constraint.min_size at 0 and the CLI sums local volumes against it,
 // so attaching one here would make the CLI refuse the very creation it just
-// asked for.
+// asked for. That is unchanged and it is why the local branch is still an
+// override rather than an honouring.
 //
 // Against sbs_volume, which is block and sums to nothing there: honouring it
 // sends the Terraform provider to GET /block/v1/zones/{zone}/volumes/{id} to
-// read the volume back, no pack serves block/v1, and the apply dies on
-// "waiting for Volume failed: http error 404 Not Found". A permanent diff is
-// bad; an apply that cannot finish is worse. It becomes honourable with #8
-// (SW-3) and not before — the two belong in one batch.
+// read the volume back. No pack served block/v1 before SW-3, and the apply died
+// on "waiting for Volume failed: http error 404 Not Found"; block/v1 is served
+// now, so it is honoured — and since #365 it is also what a request naming no
+// type gets, because it is what the cloud gives a DEV1-S.
 //
-// So today there is no writable value: the provider refuses b_ssd outright from
-// 2.79 on ("b_ssd volumes are not supported anymore"), and sbs_volume plans for
-// ever. Omitting the root_volume block is the way through, which is what the
-// conformance fixture happens to do — which is also why nothing here shows it.
-// docs/limits.md carries that as a stated limit rather than a surprise.
-func (p *Pack) rootVolume(server *resource.Resource, name, project, organization string, wanted volumeTemplate) *resource.Resource {
+// What that leaves a client: b_ssd is refused by the provider itself from 2.79
+// on ("b_ssd volumes are not supported anymore"), sbs_volume works, and omitting
+// the block gets sbs_volume too. The conformance fixture declares the block
+// rather than omitting it, which is the whole point of #8 — a fixture that
+// avoids the one input that breaks is a test that cannot fail. docs/limits.md
+// carries what is still not emulated behind an SBS volume: the storage itself.
+func (p *Pack) rootVolume(server *resource.Resource, name, project, organization, parentSnapshot string, wanted volumeTemplate) *resource.Resource {
 	// The size the client asked for, when it asked. Ignoring it gave every
 	// server the catalogue's disk whatever the request said.
 	size := uint64(rootVolumeSize)
@@ -225,26 +229,33 @@ func (p *Pack) rootVolume(server *resource.Resource, name, project, organization
 	if wanted.Name != "" {
 		volumeName = wanted.Name
 	}
-	// sbs_volume is honoured since SW-3, and it is the only asked-for type that
-	// is: the local ones stay overridden for the reason above, which is unchanged.
-	// The disk lands in block/v1 rather than instance/v1, which is where the
-	// Terraform provider goes to read it back.
+	// The default is block, which is what the cloud does (#365).
 	//
-	// THE DEFAULT IS STILL INSTANCE/V1, AND #365 IS THE OPEN QUESTION ABOUT IT.
-	// The cloud gives a DEV1-S an SBS root volume — measured twice, 2026-08-21
-	// and 2026-08-24 — so `scw` follows the server's own volumes["0"].id into
-	// block/v1alpha1 and this emulator answers 404 there. Flipping this one
-	// condition to `wanted.VolumeType == "" || …` makes that read answer, and
-	// was tried on 2026-08-27: it moves EVERY server's root disk out of
-	// instance/v1, where this pack implements the whole server-volume
-	// relationship. attach-volume, the update's volume map, CreateSnapshot,
-	// GetVolume and DeleteVolume all resolve kindVolume alone, so a client's
-	// own root disk stops being reachable through any of them — and the
-	// ownership guard that keeps one server from stealing another's root volume
-	// stops covering the root volume at all. That is a decision about where a
-	// root disk lives, not a line here, and it is the maintainer's to take.
-	if wanted.VolumeType == "sbs_volume" {
-		vol := p.newBlockRootVolume(server.Tenant.Zone, project, volumeName, size)
+	// A DEV1-S created on a real fr-par-1 account was given an SBS root volume,
+	// measured twice — 2026-08-21 and 2026-08-24, recorded in
+	// corpus/scaleway/scw-instance.jsonl — and `scw` then read it back through
+	// GET /block/v1alpha1/zones/fr-par-1/volumes/{id} and deleted it there. An
+	// instance root made that read a 404 on the path the cloud answers 200 on,
+	// on a command every client runs.
+	//
+	// This flip was tried on 2026-08-27 and reverted, because at the time it
+	// moved every root disk into a product where nothing could reach it:
+	// attach-volume, detach-volume, the update's volume map, a create naming a
+	// volume and CreateSnapshot all resolved kindVolume alone. That is fixed
+	// first and separately (#571, step 1): those five go through anyVolume, and
+	// the ownership guard covers both products. The flip is this line only
+	// because that work landed before it.
+	//
+	// The local types stay overridden for the reason above, which is unchanged:
+	// the CLI sums LOCAL volumes against volumes_constraint.min_size and would
+	// refuse the very creation it just asked for. A block root sums to nothing
+	// local, which is why this default is reachable at all —
+	// TestCatalogueKeepsTheLocalVolumeTrapDisarmed and the `scw instance server
+	// create` of the conformance suite are the two halves of that check.
+	//
+	// TestADefaultRootVolumeLivesInBlockLikeTheCloud fails without this.
+	if wanted.VolumeType == "" || wanted.VolumeType == "sbs_volume" {
+		vol := p.newBlockRootVolume(server.Tenant.Zone, project, volumeName, size, parentSnapshot)
 		// A volume this call just built: it can belong to nobody else, so the
 		// only error attachVolume returns cannot happen here.
 		_ = p.attachVolume(vol, server, name)
@@ -371,7 +382,7 @@ func (p *Pack) createServer(w http.ResponseWriter, r *http.Request) {
 	resolvedImageID, imageDisplay, imageLabel := resolveImage(req.Image)
 
 	res := resource.New(p.env.NewID(), kindServer, resource.Tenant{Provider: Name, Project: project, Zone: zone}, "stopped", now)
-	rootVol := p.rootVolume(res, req.Name, project, organization, req.Volumes["0"])
+	rootVol := p.rootVolume(res, req.Name, project, organization, p.imageRootSnapshot(resolvedImageID), req.Volumes["0"])
 
 	res.Attrs = map[string]any{
 		"name":            req.Name,
@@ -1284,7 +1295,12 @@ func (p *Pack) setServerVolumes(server *resource.Resource, wanted map[string]vol
 	for key, tmpl := range wanted {
 		switch {
 		case tmpl.ID != "":
-			vol, found := p.env.Store.Get(Name, kindVolume, tmpl.ID)
+			// Both products, through the shared resolver: the map named a
+			// volume by id and only instance/v1 was searched, so
+			// `volumes.0.id=<a block disk>` answered "volume … does not exist
+			// in fr-par-1" about a disk the same emulator had just created
+			// (#571).
+			vol, found := p.anyVolume(tmpl.ID)
 			if !found || vol.Tenant.Zone != server.Tenant.Zone {
 				return fmt.Errorf("volume %s does not exist in %s", tmpl.ID, server.Tenant.Zone)
 			}
@@ -1302,7 +1318,7 @@ func (p *Pack) setServerVolumes(server *resource.Resource, wanted map[string]vol
 				return err
 			}
 			keep[vol.ID] = true
-			view[key] = volumeView(vol)
+			view[key] = serverVolumeView(vol)
 		case tmpl.Size > 0:
 			// A template with a size and no id asks for a new disk, the way
 			// creation does. Same helper, so the two paths cannot diverge.
@@ -1547,19 +1563,21 @@ func deref(p *bool, fallback bool) bool {
 //
 // TestAdditionalVolumesAreAttachedAtCreate fails without this.
 func (p *Pack) attachTemplateVolumes(templates map[string]volumeTemplate, root, server *resource.Resource, zone, serverName string) map[string]any {
-	// A root volume that lives in block gets block's rendering inside the server,
+	// A volume that lives in block gets block's rendering inside the server,
 	// which is an instance VolumeServer carrying volume_type "sbs_volume" — the
 	// value that sends the Terraform provider to the block fallback (#8).
 	// Copying the instance view here would publish a volume with no type at all.
-	out := map[string]any{"0": volumeView(root)}
-	if root.Kind == kindBlockVolume {
-		out["0"] = blockRootVolumeServerView(root)
-	}
+	out := map[string]any{"0": serverVolumeView(root)}
 	for key, tpl := range templates {
 		if key == "0" || tpl.ID == "" {
 			continue
 		}
-		vol, ok := p.env.Store.Get(Name, kindVolume, tpl.ID)
+		// Both products: `additional-volumes.0=<a block volume id>` resolved
+		// instance/v1 alone, so a create naming a disk of the block product
+		// skipped it silently and answered 201 with the volume unattached —
+		// the same "declared, read, not to the end" shape this function was
+		// written for, one product further on (#571).
+		vol, ok := p.anyVolume(tpl.ID)
 		if !ok || vol.Tenant.Zone != zone {
 			continue
 		}
@@ -1569,7 +1587,7 @@ func (p *Pack) attachTemplateVolumes(templates map[string]volumeTemplate, root, 
 		if err := p.attachStoredVolume(vol, server, serverName); err != nil {
 			continue
 		}
-		out[key] = volumeView(vol)
+		out[key] = serverVolumeView(vol)
 	}
 	return out
 }
@@ -1605,13 +1623,25 @@ func (p *Pack) attachServerVolume(w http.ResponseWriter, r *http.Request) {
 		writeInvalidArguments(w, ArgumentError{ArgumentName: "body", Reason: "format", HelpMessage: err.Error()})
 		return
 	}
-	vol, ok := p.env.Store.Get(Name, kindVolume, req.VolumeID)
+	// Both products. AttachServerVolumeRequest declares volume_type with
+	// "sbs_volume" among its values (instance_sdk.go), so the operation this
+	// route claims is defined over a block volume — and resolving kindVolume
+	// alone answered 404 for every one of them, including a disk `scw block
+	// volume create` had just made. Measured with scw 2.56.3 (#571).
+	vol, ok := p.anyVolume(req.VolumeID)
 	if !ok || vol.Tenant.Zone != zone {
 		writeNotFound(w, "volume", req.VolumeID)
 		return
 	}
 	// The API refuses to move a volume already in use, and Terraform reads that
 	// error rather than guessing.
+	//
+	// This is also where the anti-theft guard of #202 starts covering a block
+	// disk: while the resolution above found nothing, one server could not take
+	// another's block root because nobody could reach it at all, which is an
+	// accident and not a control. attachStoredVolume asks the question for both
+	// kinds — TestAttachingDoesNotStealAnotherServersVolume now walks its three
+	// doors twice, once per product.
 	key := p.nextVolumeKey(res)
 	serverName, _ := res.Attrs["name"].(string)
 	if err := p.attachStoredVolume(vol, res, serverName); err != nil {
@@ -1623,7 +1653,7 @@ func (p *Pack) attachServerVolume(w http.ResponseWriter, r *http.Request) {
 	// stored map — never through the clone's, which resource.Clone shares with
 	// the store, and never by Commit, whose wholesale write erased a concurrent
 	// write to another field of the same server after its 200 (#295).
-	entry := volumeView(vol)
+	entry := serverVolumeView(vol)
 	var updated *resource.Resource
 	err := p.env.Store.Update(Name, kindServer, id, func(stored *resource.Resource) error {
 		volumes := make(map[string]any, len(volumeMapOf(stored))+1)
@@ -1669,7 +1699,19 @@ func (p *Pack) detachServerVolume(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w, "volume", req.VolumeID)
 		return
 	}
-	if vol, ok := p.env.Store.Get(Name, kindVolume, req.VolumeID); ok {
+	// Both products, and this is the operation of the family that did not answer
+	// 404 — it answered 200 and released nothing, which is worse.
+	//
+	// `scw instance server terminate` walks GetVolume (instance, 404) →
+	// GetVolume (block, 200) → detach-volume → and then polls the block volume
+	// until its status leaves `in_use`. With the resolution below reading
+	// kindVolume alone, the detach came back 200 while the disk kept its server
+	// in Runtime, so the status never moved and the CLI never returned: rc=124
+	// at twenty-five seconds, five identical block GETs in its own -D trace,
+	// measured on 2026-08-28 against a binary built from 3b00d23.
+	//
+	// TestTerminateReleasesABlockRootVolume fails without this.
+	if vol, ok := p.anyVolume(req.VolumeID); ok && vol.Tenant.Zone == zone {
 		p.detachStoredVolume(vol)
 	}
 	// The server's map shrinks inside the store lock, on a fresh copy — the

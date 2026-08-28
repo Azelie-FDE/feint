@@ -46,15 +46,15 @@
     {
       "label": "a released block volume keeps reading in_use, and `scw instance server delete` polls it for ever (#365)",
       "file": "internal/providers/scaleway/volumes.go",
-      "find": "\t\tif stored.Kind == kindBlockVolume {\n\t\t\tstored.State = blockVolumeAvailable\n\t\t}",
-      "replace": "\t\tif stored.Kind == kindBlockVolume && false {\n\t\t\tstored.State = blockVolumeAvailable\n\t\t}",
+      "find": "\t\t\tstored.State = blockVolumeAvailable\n",
+      "replace": "\t\t\tstored.State = stored.State + blockVolumeAvailable[:0]\n",
       "test": "TestABlockVolumeIsAvailableOnceItsServerIsGone"
     },
     {
       "label": "volumesOf walks instance/v1 alone again, so a gone server never releases the block volume it held (#365)",
       "file": "internal/providers/scaleway/volumes.go",
-      "find": "\tfor _, kind := range []string{kindVolume, kindBlockVolume} {",
-      "replace": "\tfor _, kind := range []string{kindVolume, kindBlockVolume}[:1] {",
+      "find": "\tfor _, kind := range []string{kindVolume, kindBlockVolume} {\n\t\tfor _, res := range p.env.Store.List(kind, resource.Tenant{Provider: Name}) {",
+      "replace": "\tfor _, kind := range []string{kindVolume, kindBlockVolume}[:1] {\n\t\tfor _, res := range p.env.Store.List(kind, resource.Tenant{Provider: Name}) {",
       "test": "TestABlockVolumeIsAvailableOnceItsServerIsGone"
     },
     {
