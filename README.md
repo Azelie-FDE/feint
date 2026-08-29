@@ -156,9 +156,30 @@ It needs Incus with OVN; `mise run demo:network` records it.
 
 ---
 
+## Is this the right tool for your test?
+
+Ask before installing anything, and read the answer somewhere other than here:
+**[what you can validate](docs/confidence.md)** is one page and one table, and
+it answers that question in your vocabulary rather than this project's. A row is
+a thing you might want to test; its verdict carries whatever establishes it —
+the suite that drives it, the runtime capability it keys on, or the section of
+[what it does not do](docs/limits.md) that says why the answer is no. A row with
+nothing to point at is refused by a test rather than by a reviewer.
+
+That page is deliberately the only place those verdicts are written, and this one
+copies none of them. The promise above it is generated from the capability matrix
+for exactly that reason: the sentence a human used to type there claimed a client
+this emulator refuses at the doorstep, and it contradicted the confidence page
+for two days through every green documentation gate in between (#592). A table
+recopied here would be that defect again, with six rows instead of one. The
+per-operation view, which is generated, is [docs/routes.md](docs/routes.md).
+
+---
+
 ## Contents
 
 - [Quick start](#quick-start)
+- [Is this the right tool for your test?](#is-this-the-right-tool-for-your-test)
 - [Install](#install)
 - [Use it](#use-it)
 - [The page](#the-page)
@@ -169,6 +190,9 @@ It needs Incus with OVN; `mise run demo:network` records it.
 - [Background](#background)
 - [Contributing](#contributing)
 - [License](#license)
+
+Everything that is not on this page lives in [docs/](docs/README.md), grouped
+by the question it answers rather than listed.
 
 ---
 
@@ -931,6 +955,19 @@ rather than assumed.
 
 ## Commands
 
+`feint --help` gives the flags. Exit codes are stable because CI depends on
+them: **0** ok, **1** error, **2** drift detected. `status` is the one verb that
+always exits 0, because a stopped emulator is a fact rather than a failure — the
+verb that gates is `wait`.
+
+Two tables, because they are two audiences. If you came here to point a client
+at a local cloud, the first one is the whole surface you need and you can stop
+reading at the end of it. The second measures how faithful that cloud is: it is
+what this repository runs on itself, and none of it is a step in anybody's
+workflow.
+
+### Everyday use
+
 | Command | What it does |
 |---|---|
 | `feint up` | read `feint.yaml` and bring the whole environment up: check the host, start the emulator, export the client environment, run the engine, wait for the ready conditions |
@@ -946,6 +983,17 @@ rather than assumed.
 | `feint doctor` | diagnose the host: the port, the machine runtime, the clients, the ssh trap |
 | `feint snapshot` | `save`, `load`, `list`, `rm` — name a running emulator's state and come back to it |
 | `feint serve` | serve the three emulated clouds on one port, in the foreground |
+| `feint images` | build the machine images, which carry an ssh daemon so a machine answers without a package repository |
+| `feint clean` | remove every machine, network and rule set the emulator created |
+| `feint version` | print the version |
+
+### Fidelity and development tools
+
+These answer *how close to the real cloud is this*, and they are the subject of
+[docs/conformance.md](docs/conformance.md) rather than of anybody's Terraform.
+
+| Command | What it does |
+|---|---|
 | `feint coverage` | compare the upstream API surface with what the packs serve |
 | `feint proxy` | sit between a real client and a real cloud and record every exchange, credentials redacted |
 | `feint transcript` | read a recording: what to serve next, what a response must look like, what the emulator omits |
@@ -954,16 +1002,8 @@ rather than assumed.
 | `feint probe` | drive every mounted route from its API description and check the answers |
 | `feint shapes` | the field trees a real cloud returns, versioned — and what this emulator omits from them |
 | `feint evidence` | write the per-operation evidence record a conformance run earned |
-| `feint images` | build the machine images, which carry an ssh daemon so a machine answers without a package repository |
 | `feint docs` | regenerate the coverage tables in this README |
 | `feint catalog` | print the emulated inventory a client reads before creating |
-| `feint clean` | remove every machine, network and rule set the emulator created |
-| `feint version` | print the version |
-
-`feint --help` gives the flags. Exit codes are stable because CI depends on
-them: **0** ok, **1** error, **2** drift detected. `status` is the one verb that
-always exits 0, because a stopped emulator is a fact rather than a failure — the
-verb that gates is `wait`.
 
 `feint proxy` and `feint transcript` are the record-then-read pair that turns a
 real client against a real cloud into the next operation to serve, the shape its

@@ -170,9 +170,32 @@ l'enregistre.
 
 ---
 
+## Savoir si feint convient à votre test
+
+La question se pose avant d'installer quoi que ce soit, et sa réponse est
+ailleurs qu'ici : **[ce que vous pouvez valider](docs/confidence.md)** est une
+page et un tableau qui y répondent dans votre vocabulaire plutôt que dans celui
+du projet. Une ligne est une chose que vous pourriez vouloir tester ; son
+verdict porte ce qui l'établit : la suite qui le pilote, la capacité de runtime
+sur laquelle il s'appuie, ou la section de
+[ce qu'il ne fait pas](docs/limits.md) qui dit pourquoi la réponse est non. Une
+ligne qui ne pointe vers rien est refusée par un test, pas par un relecteur.
+
+Cette page est délibérément le seul endroit où ces verdicts sont écrits, et
+celle-ci n'en recopie aucun. La promesse du démarrage rapide est générée depuis
+la matrice de capacités pour cette raison exacte : la phrase qu'un humain y
+tapait revendiquait un client que cet émulateur refuse au portillon, et elle a
+contredit la page de confiance pendant deux jours, à travers tous les contrôles
+de documentation verts de l'intervalle (#592). Un tableau recopié ici serait le
+même défaut, avec six lignes au lieu d'une. La vue opération par opération, elle,
+est générée : [docs/routes.md](docs/routes.md).
+
+---
+
 ## Sommaire
 
 - [Démarrage rapide](#démarrage-rapide)
+- [Savoir si feint convient à votre test](#savoir-si-feint-convient-à-votre-test)
 - [Installer](#installer)
 - [S'en servir](#sen-servir)
 - [La page](#la-page)
@@ -183,6 +206,9 @@ l'enregistre.
 - [Contexte](#contexte)
 - [Contribuer](#contribuer)
 - [Licence](#licence)
+
+Tout ce qui n'est pas sur cette page vit dans [docs/](docs/README.md), regroupé
+par la question à laquelle il répond plutôt que listé.
 
 ---
 
@@ -525,6 +551,17 @@ sont pas encore appliqués : [docs/conformance.fr.md](docs/conformance.fr.md).
 cette page ne nomme pas est un verbe que seul un lecteur du code trouvera, et
 c'est arrivé à dix d'entre eux avant qu'un test compare les deux listes.
 
+Les codes de sortie sont stables, parce que la CI en dépend : **0** succès,
+**1** erreur, **2** dérive détectée.
+
+Deux tableaux, parce que ce sont deux publics. Si vous venez pointer un client
+vers un cloud local, le premier est toute la surface qui vous concerne et vous
+pouvez arrêter votre lecture à la fin. Le second mesure la fidélité de ce
+cloud : c'est ce que ce dépôt exécute sur lui-même, et rien de ce qu'il contient
+n'est une étape dans le travail de qui que ce soit.
+
+### Usage quotidien
+
 | commande | ce qu'elle fait |
 | --- | --- |
 | `feint serve` | les trois clouds émulés sur un port, au premier plan |
@@ -540,6 +577,18 @@ c'est arrivé à dix d'entre eux avant qu'un test compare les deux listes.
 | `feint doctor` | diagnostique l'hôte : le port, le runtime, les clients |
 | `feint env <provider>` | l'environnement dont un vrai client de ce provider a besoin |
 | `feint snapshot` | nomme l'état d'un émulateur qui tourne et y revient : `save`, `load`, `list`, `rm` |
+| `feint images` | construit les images de machines, qui portent un démon ssh pour répondre sans dépôt de paquets |
+| `feint clean` | retire les machines, réseaux et jeux de règles que l'émulateur a créés |
+| `feint version` | affiche la version |
+
+### Outils de fidélité et de développement
+
+Ils répondent à la question *à quelle distance du vrai cloud sommes-nous*, et
+leur sujet est [docs/conformance.fr.md](docs/conformance.fr.md), pas le
+Terraform de qui que ce soit.
+
+| commande | ce qu'elle fait |
+| --- | --- |
 | `feint coverage` | la surface amont servie, déclinée ou non triée |
 | `feint proxy` | enregistre ce qu'un vrai client et un vrai cloud se disent, identifiants masqués |
 | `feint transcript` | lit un enregistrement : quoi servir ensuite, quelle forme, ce que l'émulateur omet |
@@ -548,14 +597,8 @@ c'est arrivé à dix d'entre eux avant qu'un test compare les deux listes.
 | `feint probe` | pilote chaque route montée depuis sa description d'API et contrôle les réponses |
 | `feint shapes` | ce qu'un vrai cloud renvoie, et ce que l'émulateur en omet |
 | `feint evidence` | écrit le registre de preuves qu'une exécution de conformance a gagnées, opération par opération |
-| `feint images` | construit les images de machines, qui portent un démon ssh pour répondre sans dépôt de paquets |
 | `feint docs` | régénère les tableaux de couverture de cette page |
 | `feint catalog` | affiche l'inventaire émulé qu'un client lit avant de créer |
-| `feint clean` | retire les machines, réseaux et jeux de règles que l'émulateur a créés |
-| `feint version` | affiche la version |
-
-Les codes de sortie sont stables, parce que la CI en dépend : **0** succès,
-**1** erreur, **2** dérive détectée.
 
 `feint replay` et `feint coverage --observed` ferment la boucle que `feint
 proxy` ouvre. Le premier renvoie chaque requête enregistrée à l'émulateur et
